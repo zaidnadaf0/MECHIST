@@ -131,8 +131,11 @@ service cloud.firestore {
         (resource.data.customerId == request.auth.uid
           && isCustomer()
           && request.resource.data.status in ['cancelled', 'completed']
+          // cancelledAt / cancelledBy / cancellationReason are the audit
+          // fields written by `cancelRequest` in src/lib/customer.ts.
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['status', 'rating', 'comment', 'ratedAt', 'updatedAt'])) ||
+              .hasOnly(['status', 'rating', 'comment', 'ratedAt', 'updatedAt',
+                        'cancelledAt', 'cancelledBy', 'cancellationReason'])) ||
         // Mechanic advances an already-assigned job, or writes live
         // coords. The mechanicId/mechanicName are frozen once set.
         (resource.data.mechanicId == request.auth.uid

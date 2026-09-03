@@ -31,7 +31,8 @@
  *  R003  users/{uid} update rule forbids mutating 'approved'
  *  R004  requests/{id} read allows customer + mechanic-queue + admin
  *  R005  requests/{id} create requires status == 'requested'
- *  R006  requests/{id} update has the customer-cancel/rate branch
+ *  R006  requests/{id} update has the customer-cancel/rate branch AND its
+ *        hasOnly([...]) permits cancelledAt / cancelledBy / cancellationReason
  *  R007  mechanic-advance branch freezes mechanicId/mechanicName
  *  R008  requests/{id} update has the FIRST-ASSIGNMENT branch
  *  R009  FIRST-ASSIGNMENT branch enforces request.time < offerExpiresAt
@@ -165,11 +166,25 @@ function record(id, label, pass, detail) {
   const start = block ? block.indexOf('allow update:') : -1;
   const end = block ? block.indexOf('allow delete:', start) : -1;
   const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
-  const pass = /resource\.data\.customerId\s*==\s*request\.auth\.uid[\s\S]*?isCustomer\(\)/.test(body)
+  const hasBranch = /resource\.data\.customerId\s*==\s*request\.auth\.uid[\s\S]*?isCustomer\(\)/.test(body)
     && /status\s+in\s+\[\s*'cancelled'\s*,\s*'completed'\s*\]/.test(body);
-  record('R006', 'requests/{id} update has the customer-cancel/rate branch',
+  // The customer branch's hasOnly([...]) must permit the audit fields that
+  // src/lib/customer.ts `cancelRequest` writes; otherwise every customer
+  // cancel is permission-denied. We isolate the FIRST hasOnly after the
+  // customerId guard -- that is the customer branch (the mechanic and
+  // first-assignment branches come after it).
+  const CANCEL_FIELDS = ['cancelledAt', 'cancelledBy', 'cancellationReason'];
+  const custHasOnly = /resource\.data\.customerId\s*==\s*request\.auth\.uid[\s\S]*?hasOnly\(\[([^\]]*)\]\)/.exec(body);
+  const allowed = custHasOnly
+    ? custHasOnly[1].split(',').map((k) => k.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+    : [];
+  const missing = CANCEL_FIELDS.filter((k) => !allowed.includes(k));
+  const pass = hasBranch && missing.length === 0;
+  record('R006', 'requests/{id} update has the customer-cancel/rate branch and permits cancelledAt/cancelledBy/cancellationReason',
     pass,
-    pass ? null : 'customer-cancel/rate branch missing or malformed');
+    !hasBranch
+      ? 'customer-cancel/rate branch missing or malformed'
+      : (missing.length ? `customer hasOnly([...]) is missing: ${missing.join(', ')}` : null));
 }
 
 // R007
