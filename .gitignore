@@ -17,3 +17,5 @@ pnpm-debug.log*
 
 # Local ops scripts
 scripts/last-claim.json
+
+*.stackdump
