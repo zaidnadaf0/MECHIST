@@ -1,0 +1,223 @@
+rules_version = '2';
+// Firestore security rules for MECHIST.
+//
+// Trust model:
+//   - The client is untrusted. The localStorage role and any client-side
+//     `users/{uid}.role` are *hints*; the only authoritative role for
+//     production access is the custom claim `request.auth.token.role`.
+//   - Until Cloud Functions mint the `role` claim, we read the role from
+//     the user's own `users/{uid}.role` doc but only use it to gate the
+//     user's own writes. Admin operations are blocked by default; the
+//     `request.auth.token.admin == true` clause below becomes live the
+//     moment a Cloud Function sets that claim.
+//
+// Roles:
+//   customer  - read/create their own requests + vehicles
+//   mechanic  - read open requests; update ones they own (assigned to them)
+//   admin     - read all, limited write power (see below)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- helpers ----------------------------------------------------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+    /** Pull the role from a custom claim, falling back to a string read of
+     *  `users/{uid}.role` so we can ship before claims go live. Both paths
+     *  require the caller to be signed in. */
+    function role() {
+      return isSignedIn()
+        && (
+          (request.auth.token.role is string && request.auth.token.role) ||
+          (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role is string
+              && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role)
+        );
+    }
+    function isCustomer() { return role() == 'customer'; }
+    function isMechanic() { return role() == 'mechanic'; }
+    function isAdmin()    { return role() == 'admin'; }
+    function isClaimAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+    function isMechanicApproved() {
+      return isMechanic()
+        && get(/databases/$(database)/documents/mechanics/$(request.auth.uid)).data.approved == true;
+    }
+
+    // ---- users/{uid} -----------------------------------------------
+
+    match /users/{uid} {
+      // A user can read their own doc. An admin (claim) can read all.
+      allow read: if isSelf(uid) || isClaimAdmin();
+
+      // A user can create their own doc. The doc must declare a role,
+      // and the role must be one of the public-facing roles. Admin
+      // accounts cannot be self-issued from the client.
+      allow create: if isSelf(uid)
+        && request.resource.data.role in ['customer', 'mechanic']
+        // Sensible shape: only the keys we expect.
+        && request.resource.data.keys().hasAll(['role', 'email'])
+        // No password-like fields are ever allowed in user docs.
+        && !('password' in request.resource.data)
+        && !('passwordHash' in request.resource.data);
+
+      // A user can update their own doc, but cannot promote themselves
+      // to admin and cannot flip the `approved` flag (mechanics cannot
+      // self-approve either; that gate lives on /mechanics/{uid}).
+      allow update: if (isSelf(uid) || isClaimAdmin())
+        && request.resource.data.role == resource.data.role
+        && !('approved' in request.resource.data.diff(resource.data).affectedKeys());
+
+      // Only an admin (claim) may delete.
+      allow delete: if isClaimAdmin();
+    }
+
+    // ---- vehicles/{id} ---------------------------------------------
+
+    // Vehicles are owned by the customer; the doc id is suffixed with
+    // the owner uid at creation time, so we accept both legacy and
+    // new shapes by checking the `ownerId` field.
+    match /vehicles/{id} {
+      allow read:   if isSignedIn()
+        && (resource.data.ownerId == request.auth.uid || isClaimAdmin());
+      allow create: if isSignedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && isCustomer();
+      allow update, delete: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+    // ---- requests/{id} ---------------------------------------------
+
+    match /requests/{id} {
+      // Open offers (status == 'requested') are visible to any signed-in
+      // approved mechanic so the dispatch queue works. A mechanic's own
+      // accepted jobs are also visible. The customer who created the
+      // request can always read it. Admins can read all.
+      allow read: if isSignedIn() && (
+        isClaimAdmin() ||
+        resource.data.customerId == request.auth.uid ||
+        (resource.data.status == 'requested' && isMechanicApproved()) ||
+        (resource.data.mechanicId == request.auth.uid)
+      );
+
+      // Customers create their own requests. The `customerId` field must
+      // match the caller's uid and the initial status must be 'requested'.
+      allow create: if isSignedIn() && isCustomer()
+        && request.resource.data.customerId == request.auth.uid
+        && request.resource.data.status == 'requested'
+        && request.resource.data.offerExpiresAt is number;
+
+      // The customer can cancel/rate their own request. The mechanic can
+      // accept a queued job (records mechanicId/mechanicName/etaMin) and
+      // advance it along the documented state machine, but only when
+      // fields outside their control (e.g. customerId, customerLat/Lng,
+      // mechanicLat/Lng that they may be updating live) are unchanged.
+      //
+      // The accept window is enforced by the rule on the "first
+      // assignment" branch below (`request.time < offerExpiresAt`),
+      // so a stale offer cannot be claimed by a determined client
+      // bypassing the `acceptJob` transaction. A Cloud Function
+      // listening to `requests/{id}` is still recommended to flip
+      // the status to 'cancelled' once `offerExpiresAt < now`, but
+      // the security boundary is already here.
+      allow update: if isSignedIn() && (
+        // Customer cancels or rates their own request.
+        (resource.data.customerId == request.auth.uid
+          && isCustomer()
+          && request.resource.data.status in ['cancelled', 'completed']
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'rating', 'comment', 'ratedAt', 'updatedAt'])) ||
+        // Mechanic advances an already-assigned job, or writes live
+        // coords. The mechanicId/mechanicName are frozen once set.
+        (resource.data.mechanicId == request.auth.uid
+          && isMechanic()
+          && request.resource.data.mechanicId == resource.data.mechanicId
+          && request.resource.data.mechanicName == resource.data.mechanicName
+          && request.resource.data.status in
+             ['accepted', 'on-the-way', 'arrived', 'service', 'completed', 'cancelled']
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'mechanicLat', 'mechanicLng', 'etaMin',
+                        'rating', 'comment', 'ratedAt', 'updatedAt'])) ||
+        // Mechanic records the accept transition. The previous
+        // mechanicId must be null/empty (i.e. this is the first time
+        // anyone is picking it up) and the new value must be the
+        // caller's uid. Without these extra checks the "first
+        // assignment" could be done by any approved mechanic.
+        //
+        // The offer window is also enforced here: `offerExpiresAt` is
+        // set on create and must still be in the future at the moment
+        // the rules evaluate the write. The client-side `acceptJob`
+        // transaction performs the same check, but duplicating it in
+        // the rules is what stops a determined client from bypassing
+        // the transaction wrapper.
+        (resource.data.status == 'requested'
+          && request.resource.data.status == 'accepted'
+          && (resource.data.mechanicId == null
+              || resource.data.mechanicId == '')
+          && request.resource.data.mechanicId == request.auth.uid
+          && request.resource.data.mechanicName is string
+          && request.resource.data.offerExpiresAt is number
+          && request.time < request.resource.data.offerExpiresAt
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'mechanicId', 'mechanicName',
+                        'etaMin', 'updatedAt'])
+          && isMechanic()) ||
+        // Admin can override anything.
+        isClaimAdmin()
+      );
+
+      // Only admin (claim) deletes.
+      allow delete: if isClaimAdmin();
+    }
+
+    // ---- mechanics/{uid} -------------------------------------------
+
+    match /mechanics/{uid} {
+      // Public directory: anyone (signed-in or anonymous) can read the
+      // public mechanic roster so the `/mechanics` page works without
+      // forcing a login first. Sensitive fields (phone, email) are
+      // intentionally exposed for the MVP; production hardening should
+      // move them to a separate sub-collection with stricter rules.
+      allow read: if true;
+
+      // Self-create on signup. Must be one of the un-approved
+      // verification states — clients cannot mark themselves approved.
+      allow create: if isSelf(uid)
+        && isSignedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.approved == false
+        && request.resource.data.verificationStatus in ['pending', 'under_review']
+        && !('password' in request.resource.data)
+        && !('passwordHash' in request.resource.data);
+
+      // Self-update of profile fields, but:
+      //   - cannot self-approve or change `verificationStatus`
+      //   - cannot change `rating` / `reviewCount` (server-aggregated)
+      //   - can change `isAvailable`, `currentLat`, `currentLng`,
+      //     `locationUpdatedAt`, `baseLat`, `baseLng`
+      // Admins (claim) can update anything.
+      allow update: if isSignedIn() && (
+        (isSelf(uid) && isMechanic()
+          && request.resource.data.approved == resource.data.approved
+          && request.resource.data.verificationStatus == resource.data.verificationStatus
+          && !('rating' in request.resource.data.diff(resource.data).affectedKeys())
+          && !('reviewCount' in request.resource.data.diff(resource.data).affectedKeys())) ||
+        isClaimAdmin()
+      );
+
+      allow delete: if isClaimAdmin();
+    }
+
+    // ---- catch-all --------------------------------------------------
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

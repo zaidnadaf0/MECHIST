@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0d10" />
+    <meta name="description" content="MECHIST — Roadside help when you need it. Find nearby mechanics, request assistance, and track your service in real time." />
+    <title>MECHIST — Roadside Assistance, Reimagined</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      /* Force animations regardless of OS / browser reduced-motion
+         preference. framer-motion, our motion/ helpers, and any CSS
+         @media (prefers-reduced-motion: reduce) rule all key off the
+         document-level matchMedia — this overrides that. */
+      html { color-scheme: dark light; }
+    </style>
+    <script>
+      (function () {
+        if (typeof window === 'undefined' || !window.matchMedia) return;
+        var original = window.matchMedia.bind(window);
+        var NO_PREF = {
+          matches: false,
+          media: '(prefers-reduced-motion: no-preference)',
+          onchange: null,
+          addEventListener: function () {},
+          removeEventListener: function () {},
+          addListener: function () {},
+          removeListener: function () {},
+          dispatchEvent: function () { return false; }
+        };
+        window.matchMedia = function (q) {
+          if (typeof q === 'string' && q.indexOf('prefers-reduced-motion') !== -1) {
+            return NO_PREF;
+          }
+          return original(q);
+        };
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,322 @@
+/**
+ * Mechanic-facing data access. All accessors are null-safe: if Firebase
+ * is not configured, they return early and the page renders the empty
+ * or error state itself.
+ */
+import {
+  collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction,
+  serverTimestamp, updateDoc, where,
+  type DocumentData, type Unsubscribe,
+} from 'firebase/firestore';
+import { db } from '@/app/firebase';
+import type { ServiceRequest } from './customer';
+import { OFFER_WINDOW_MS } from './customer';
+
+function requireDb() {
+  const handle = db();
+  if (!handle) throw new Error('Firebase is not configured.');
+  return handle;
+}
+
+function asRequest(id: string, raw: DocumentData | undefined): ServiceRequest | null {
+  if (!raw) return null;
+  return { id, ...(raw as Omit<ServiceRequest, 'id'>) };
+}
+
+export type JobStatus = ServiceRequest['status'];
+
+export interface MechanicProfile {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  /** Verification lifecycle for a newly-registered mechanic. */
+  verificationStatus?: 'pending' | 'under_review' | 'approved' | 'rejected';
+  /** True when an admin has approved this mechanic (`verificationStatus === 'approved'`). */
+  approved: boolean;
+  specialties: string[];
+  /** Supported vehicle types (e.g. ['car','motorcycle','suv']). */
+  vehicleTypes?: string[];
+  /** Years of professional experience. */
+  experienceYears?: number;
+  /** Willing to travel up to this many km from the base. */
+  serviceRadiusKm?: number;
+  isAvailable: boolean;
+  rating?: number;
+  reviewCount?: number;
+  vehicleDescription?: string;
+  /** Workshop name (or mobile rig name). */
+  garageName?: string;
+  /** Free-text workshop address; geocoding is a future-phase concern. */
+  garageAddress?: string;
+  /** Current (live) coordinates from watchPosition. */
+  currentLat?: number;
+  /** Current (live) coordinates from watchPosition. */
+  currentLng?: number;
+  /** Epoch ms of the most recent position push to Firestore. */
+  locationUpdatedAt?: number;
+  /** Base (home/garage) location — used for "nearby" distance and ETA. */
+  baseLat?: number;
+  baseLng?: number;
+}
+
+/** Live queue of jobs in 'requested' state, ordered by recency. */
+export function watchIncoming(cb: (jobs: ServiceRequest[]) => void): Unsubscribe | null {
+  try {
+    const d = requireDb();
+    return onSnapshot(
+      query(collection(d, 'requests'), where('status', '==', 'requested'), orderBy('createdAt', 'desc'), limit(20)),
+      (snap) => {
+        const jobs = snap.docs
+          .map((s) => asRequest(s.id, s.data()))
+          .filter((j): j is ServiceRequest => Boolean(j));
+        cb(jobs);
+      },
+      () => cb([]),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Tri-state result of an accept attempt. */
+export type AcceptResult = 'accepted' | 'expired' | 'alreadyTaken' | 'error';
+
+/** Pick a sensible ETA when the customer didn't pass one in. */
+function deriveEta(
+  mechanicBase: { lat: number; lng: number } | undefined,
+  request: ServiceRequest,
+): number {
+  if (mechanicBase) {
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(request.customerLat - mechanicBase.lat);
+    const dLng = toRad(request.customerLng - mechanicBase.lng);
+    const lat1 = toRad(mechanicBase.lat);
+    const lat2 = toRad(request.customerLat);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    const km = 2 * 6371 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    if (Number.isFinite(km) && km > 0) {
+      return Math.max(1, Math.round((km / 35) * 60));
+    }
+  }
+  return request.etaMin ?? 15;
+}
+
+/**
+ * Accept a queued request.
+ *
+ * Uses a Firestore transaction so the read-then-write is atomic:
+ *   - read the request doc
+ *   - if `status !== 'requested'`, return `alreadyTaken`
+ *   - if `offerExpiresAt < now`, return `expired`
+ *   - otherwise write `accepted` + mechanicId/mechanicName/etaMin/updatedAt
+ *     and return `accepted`
+ *
+ * Pages that only need the boolean ("did it work?") can use:
+ *   `result === 'accepted'`.
+ */
+export async function acceptJob(
+  id: string,
+  mechanicId: string,
+  mechanicName: string,
+  etaMin?: number,
+  mechanicBase?: { lat: number; lng: number },
+): Promise<AcceptResult> {
+  try {
+    const d = requireDb();
+    const ref = doc(d, 'requests', id);
+    const result = await runTransaction(d, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return 'alreadyTaken' as const;
+      const data = snap.data() as ServiceRequest;
+      if (data.status !== 'requested') return 'alreadyTaken' as const;
+      if (data.offerExpiresAt != null && data.offerExpiresAt < Date.now()) {
+        return 'expired' as const;
+      }
+      const eta = etaMin ?? deriveEta(mechanicBase, data);
+      tx.update(ref, {
+        status: 'accepted',
+        mechanicId,
+        mechanicName,
+        etaMin: eta,
+        updatedAt: serverTimestamp(),
+      });
+      return 'accepted' as const;
+    });
+    return result;
+  } catch {
+    return 'error';
+  }
+}
+
+export async function updateJobStatus(id: string, status: JobStatus): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await updateDoc(doc(d, 'requests', id), { status, updatedAt: serverTimestamp() });
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Decline an offer while the request is still in 'requested' state.
+ *
+ * We don't change the request status — only append the mechanic's uid
+ * to `declinedBy[]`. The offer window keeps ticking for the remaining
+ * candidates. Operators see the declinedBy list as a signal that a
+ * mechanic is cycling through offers without accepting.
+ *
+ * A second decline from the same mechanic is a no-op (uid is deduped
+ * in the transaction).
+ */
+export async function declineOffer(
+  requestId: string,
+  mechanicId: string,
+): Promise<'declined' | 'alreadyTaken' | 'forbidden' | 'error'> {
+  try {
+    const d = requireDb();
+    const ref = doc(d, 'requests', requestId);
+    return await runTransaction(d, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return 'alreadyTaken' as const;
+      const data = snap.data() as ServiceRequest;
+      if (data.status !== 'requested') return 'alreadyTaken' as const;
+      const list = Array.isArray(data.declinedBy) ? data.declinedBy : [];
+      if (list.includes(mechanicId)) return 'declined' as const;
+      tx.update(ref, {
+        declinedBy: [...list, mechanicId],
+        updatedAt: serverTimestamp(),
+      });
+      return 'declined' as const;
+    });
+  } catch (e: unknown) {
+    const code = (e as { code?: string } | null)?.code;
+    if (code === 'permission-denied') return 'forbidden';
+    return 'error';
+  }
+}
+
+/** Statuses where the mechanic can still release a job back to the queue. */
+const RELEASABLE_STATUSES = ['accepted', 'on-the-way', 'arrived', 'service'] as const;
+
+/**
+ * Release an accepted job back to the queue.
+ *
+ *  - status  -> 'requested'
+ *  - mechanicId / mechanicName cleared so the offer is open again
+ *  - offerExpiresAt extended by OFFER_WINDOW_MS so the next candidate
+ *    gets a fresh window
+ *  - releaseReason stored for operator audit
+ *
+ * The Firestore rule that protects this branch must use hasOnly(...)
+ * so the mechanic cannot write arbitrary fields.
+ */
+export async function releaseJob(
+  requestId: string,
+  mechanicId: string,
+  reason: string,
+): Promise<'released' | 'not_assigned' | 'invalid_state' | 'forbidden' | 'error'> {
+  try {
+    const d = requireDb();
+    const ref = doc(d, 'requests', requestId);
+    return await runTransaction(d, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return 'invalid_state' as const;
+      const data = snap.data() as ServiceRequest;
+      if (data.mechanicId !== mechanicId) return 'not_assigned' as const;
+      if (!(RELEASABLE_STATUSES as readonly string[]).includes(data.status)) {
+        return 'invalid_state' as const;
+      }
+      tx.update(ref, {
+        status: 'requested',
+        mechanicId: null,
+        mechanicName: null,
+        mechanicLat: null,
+        mechanicLng: null,
+        offerExpiresAt: Date.now() + OFFER_WINDOW_MS,
+        releaseReason: reason,
+        releasedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return 'released' as const;
+    });
+  } catch (e: unknown) {
+    const code = (e as { code?: string } | null)?.code;
+    if (code === 'permission-denied') return 'forbidden';
+    return 'error';
+  }
+}
+
+export async function getMechanicProfile(uid: string): Promise<MechanicProfile | null> {
+  try {
+    const d = requireDb();
+    const snap = await getDoc(doc(d, 'mechanics', uid));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as Omit<MechanicProfile, 'id'>) };
+  } catch { return null; }
+}
+
+export async function setAvailability(uid: string, isAvailable: boolean): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await updateDoc(doc(d, 'mechanics', uid), { isAvailable, updatedAt: serverTimestamp() });
+    return true;
+  } catch { return false; }
+}
+
+/** Push the mechanic's live GPS coordinates onto their own profile doc. */
+export async function pushMechanicLocation(uid: string, lat: number, lng: number): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await updateDoc(doc(d, 'mechanics', uid), {
+      currentLat: lat,
+      currentLng: lng,
+      locationUpdatedAt: Date.now(),
+      updatedAt: serverTimestamp(),
+    });
+    return true;
+  } catch { return false; }
+}
+
+/** Push the mechanic's live GPS coordinates onto the in-flight request. */
+export async function pushMechanicLocationToRequest(requestId: string, lat: number, lng: number): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await updateDoc(doc(d, 'requests', requestId), {
+      mechanicLat: lat,
+      mechanicLng: lng,
+      updatedAt: serverTimestamp(),
+    });
+    return true;
+  } catch { return false; }
+}
+
+export async function listCompletedJobs(mechanicId: string, max = 30): Promise<ServiceRequest[]> {
+  try {
+    const d = requireDb();
+    const snap = await getDocs(
+      query(collection(d, 'requests'),
+        where('mechanicId', '==', mechanicId),
+        where('status', '==', 'completed'),
+        orderBy('updatedAt', 'desc'),
+        limit(max),
+      ),
+    );
+    return snap.docs.map((s) => asRequest(s.id, s.data())).filter((r): r is ServiceRequest => Boolean(r));
+  } catch { return []; }
+}
+
+export async function listActiveJob(mechanicId: string): Promise<ServiceRequest | null> {
+  try {
+    const d = requireDb();
+    const snap = await getDocs(
+      query(collection(d, 'requests'),
+        where('mechanicId', '==', mechanicId),
+        where('status', 'in', ['accepted', 'on-the-way', 'arrived', 'service']),
+        limit(1),
+      ),
+    );
+    if (snap.empty) return null;
+    const doc0 = snap.docs[0];
+    return asRequest(doc0.id, doc0.data());
+  } catch { return null; }
+}
