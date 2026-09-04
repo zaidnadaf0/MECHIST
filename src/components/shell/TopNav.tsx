@@ -20,6 +20,7 @@ import { motion, AnimatePresence, useScroll, useSpring } from 'framer-motion';
 import {
   Activity,
   ChevronRight,
+  MapPin,
   Menu,
   Radar,
   ShieldCheck,
@@ -49,7 +50,8 @@ const roleHue = {
 
 const publicLinks: NavItem[] = [
   { to: '/', label: 'Overview', icon: <Activity size={12} aria-hidden /> },
-  { to: '/#how-it-works', label: 'How it works', icon: <Radar size={12} aria-hidden /> },
+  { to: '/how-it-works', label: 'How it works', icon: <Radar size={12} aria-hidden /> },
+  { to: '/map', label: 'Map', icon: <MapPin size={12} aria-hidden /> },
   { to: '/mechanics', label: 'Network', icon: <Users2 size={12} aria-hidden /> },
   { to: '/#trust', label: 'Trust', icon: <ShieldCheck size={12} aria-hidden /> },
 ];

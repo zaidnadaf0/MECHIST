@@ -43,7 +43,6 @@ import {
   HeroVideoDialog,
   OrbitingCircles,
   ShimmerButton,
-  SparklesText,
   TextAnimate,
 } from '@/components/magicui';
 
@@ -51,6 +50,7 @@ import {
 /* Static data                                                                */
 /* -------------------------------------------------------------------------- */
 
+/** Illustrative preview targets — not live telemetry. Live counts are on /map and /mechanics. */
 const STATUS: { k: string; v: string }[] = [
   { k: 'dispatch', v: 'nominal' },
   { k: 'units online', v: '1,240' },
@@ -120,13 +120,9 @@ export function Hero() {
 
             <BlurFade inView={false} delay={0.45}>
               <p className="mt-6 max-w-xl text-body-lg text-fg-muted text-pretty">
-                MECHIST pairs drivers with vetted mechanics in under{' '}
-                <SparklesText color="rgb(34 199 194)" className="font-semibold">
-                  8 minutes
-                </SparklesText>
-                . Real-time tracking, transparent pricing, and one calm interface
-                from breakdown to bill — built for the moment everything goes
-                sideways.
+                Share your location, get matched with nearby mechanics, and follow
+                every status update from request to resolution — one calm interface
+                built for the moment everything goes sideways.
               </p>
             </BlurFade>
 
@@ -190,7 +186,7 @@ function StatusBar() {
   return (
     <div className="relative border-b border-line-soft bg-surface-app/60 backdrop-blur">
       <div className="container no-scrollbar flex items-center gap-5 overflow-x-auto py-2.5">
-        <Badge tone="aqua" size="sm" live>live</Badge>
+        <Badge tone="aqua" size="sm" live>preview</Badge>
         {STATUS.map((s) => (
           <span key={s.k} className="flex shrink-0 items-center gap-2 whitespace-nowrap">
             <span className="eyebrow">{s.k}</span>
@@ -199,9 +195,10 @@ function StatusBar() {
         ))}
         <span className="ml-auto hidden shrink-0 items-center gap-2 md:flex">
           <span className="eyebrow">last sync</span>
-          <span className="stat-num text-xs text-fg-app">just now</span>
+          <span className="stat-num text-xs text-fg-app">illustrative</span>
         </span>
       </div>
+      <span className="sr-only">Status readouts are illustrative preview targets, not live telemetry. Live data is on the map and dashboards.</span>
     </div>
   );
 }

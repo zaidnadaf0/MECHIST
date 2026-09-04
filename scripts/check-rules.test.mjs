@@ -60,14 +60,19 @@ describe('check-rules.mjs — Phase 9 invariants', () => {
     }
   });
 
-  it('a deliberately broken rules file fails the linter', () => {
+it('a deliberately broken rules file fails the linter', () => {
     // Strip the two most-recently-added Phase 9 invariants: offer-expiry
     // (R009) and the affected-keys allowlist (R010). The linter should
     // flag exactly those.
+    // Target the FIRST-ASSIGNMENT branch (the last branch before admin) which
+    // has the offerExpiresAt check and the specific hasOnly keys.
     const real = readFileSync(rulesFile, 'utf8');
     const broken = real
-      .replace(/&& request\.resource\.data\.offerExpiresAt is number\n\s*&& request\.time < request\.resource\.data\.offerExpiresAt\n/, '')
-      .replace(/hasOnly\(\[\s*'status',\s*'mechanicId',\s*'mechanicName',\s*'etaMin',\s*'updatedAt'\s*\]\)/, 'hasOnly([])');
+      // Remove the offerExpiresAt check AND the hasOnly keys from the first-assignment branch
+      .replace(
+        /&& request\.resource\.data\.offerExpiresAt is number\r?\n\s*&& request\.time < request\.resource\.data\.offerExpiresAt\r?\n\s*&& request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\r?\n\s*\.hasOnly\(\['status',\s*'mechanicId',\s*'mechanicName',\r?\n\s*'etaMin',\s*'updatedAt'\]\)/,
+        "&& request.resource.data.diff(resource.data).affectedKeys()\n              .hasOnly([])"
+      );
 
     expect(broken).not.toBe(real);
 

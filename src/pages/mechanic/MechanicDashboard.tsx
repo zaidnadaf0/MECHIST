@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Activity, ArrowRight, Check, CircleAlert, Clock, MapPin, Power, Star, Wrench, X } from 'lucide-react';
-import { Badge, Button, Card, IconTile, Progress, Sparkbars, Stat, useToast } from '@/components/ui';
+import { Activity, ArrowRight, Check, CircleAlert, Clock, MapPin, Power, Star, Wrench, X, XCircle } from 'lucide-react';
+import { Badge, Button, Card, IconTile, Progress, Sparkbars, Stat, useToast, Modal, Textarea } from '@/components/ui';
 import { EmptyState, ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn, PageTransition } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import {
   watchIncoming, getMechanicProfile, setAvailability, acceptJob, listActiveJob, listCompletedJobs,
-  type MechanicProfile,
+  declineOffer, type MechanicProfile,
 } from '@/lib/mechanic';
 import type { ServiceRequest } from '@/lib/customer';
 import { inr, verificationUi, type VerificationStatus } from '@/lib/authUI';
@@ -41,6 +41,7 @@ export function MechanicDashboard() {
   const [accepting, setAccepting] = useState<string | null>(null);
   const [busyAvail, setBusyAvail] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const [declining, setDeclining] = useState<{ jobId: string; reason: string } | null>(null);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
@@ -58,7 +59,7 @@ export function MechanicDashboard() {
       setHistory(h);
       unsub = watchIncoming((jobs) => {
         if (!cancelled) setIncoming(jobs);
-      });
+      }, user.uid);
     })();
     return () => {
       cancelled = true;
@@ -161,10 +162,39 @@ export function MechanicDashboard() {
     toast.push({ title: 'Could not accept', description: 'Please try again.', tone: 'danger' });
   };
 
+  const onDeclineOpen = (job: ServiceRequest) => {
+    setDeclining({ jobId: job.id, reason: '' });
+  };
+
+  const onDeclineSubmit = async () => {
+    if (!declining || !loaded) return;
+    const { jobId, reason } = declining;
+    setAccepting(jobId);
+    const result = await declineOffer(jobId, user.uid);
+    setAccepting(null);
+    setDeclining(null);
+    if (result === 'declined') {
+      setDismissed((d) => d.includes(jobId) ? d : [...d, jobId]);
+      toast.push({ title: 'Offer declined', description: reason ? `Reason: ${reason}` : undefined, tone: 'info' });
+      return;
+    }
+    if (result === 'forbidden') {
+      toast.push({ title: 'Cannot decline', description: 'You are not authorized to decline this offer.', tone: 'danger' });
+      return;
+    }
+    if (result === 'alreadyTaken') {
+      setDismissed((d) => d.includes(jobId) ? d : [...d, jobId]);
+      toast.push({ title: 'Offer unavailable', description: 'This offer was already taken or expired.', tone: 'info' });
+      return;
+    }
+    toast.push({ title: 'Could not decline', description: 'Please try again.', tone: 'danger' });
+  };
+
   return (
-    <PageTransition>
-      <div className="container section-sm">
-        <FadeIn>
+    <>
+      <PageTransition>
+        <div className="container section-sm">
+          <FadeIn>
           {loaded && status && (
             <VerificationBanner
               tone={verif.badgeTone}
@@ -184,7 +214,7 @@ export function MechanicDashboard() {
                 {loaded ? `Welcome, ${loaded.name}` : 'Welcome.'}
               </h1>
               <p className="mt-2 max-w-xl text-small text-fg-muted text-pretty">
-                Live dispatch, job stages and shift totals. Offers expire two minutes after they are raised.
+                Live dispatch, job stages and shift totals. Go online to receive jobs — availability toggles your presence in the queue. Offers expire after two minutes; GPS is throttled 25&nbsp;m&nbsp;/&nbsp;5&nbsp;s and shared only after you accept.
               </p>
             </div>
 
@@ -319,24 +349,25 @@ export function MechanicDashboard() {
               </div>
               <p aria-live="polite" className="sr-only">{offers.length} job offers waiting.</p>
               <ul className="mt-3 grid gap-3">
-                {offers.length === 0 ? (
-                  <li>
-                    <EmptyState kind="incoming" title="Queue is quiet" description="New jobs appear here in realtime the moment a customer requests help." />
-                  </li>
-                ) : (
-                  offers.map((j) => (
-                    <OfferCard
-                      key={j.id}
-                      job={j}
-                      now={now}
-                      accepting={accepting === j.id}
-                      disabled={Boolean(accepting) || !loaded || !verif.canAcceptJobs}
-                      blockReason={!verif.canAcceptJobs ? verif.bannerTitle : undefined}
-                      onAccept={() => onAccept(j)}
-                      onDismiss={() => setDismissed((d) => [...d, j.id])}
-                    />
-                  ))
-                )}
+{offers.length === 0 ? (
+                    <li>
+                      <EmptyState kind="incoming" title="Queue is quiet" description="New jobs appear here in realtime the moment a customer requests help." />
+                    </li>
+                  ) : (
+                    offers.map((j) => (
+                      <OfferCard
+                        key={j.id}
+                        job={j}
+                        now={now}
+                        accepting={accepting === j.id}
+                        disabled={Boolean(accepting) || !loaded || !verif.canAcceptJobs}
+                        blockReason={!verif.canAcceptJobs ? verif.bannerTitle : undefined}
+                        onAccept={() => onAccept(j)}
+                        onDismiss={() => setDismissed((d) => [...d, j.id])}
+                        onDecline={() => onDeclineOpen(j)}
+                      />
+                    ))
+                  )}
               </ul>
             </section>
           </div>
@@ -376,13 +407,22 @@ export function MechanicDashboard() {
         </div>
       </div>
     </PageTransition>
+      <DeclineModal
+        open={!!declining}
+        onClose={() => setDeclining(null)}
+        onSubmit={onDeclineSubmit}
+        reason={declining?.reason ?? ''}
+        setReason={(v) => setDeclining((d) => (d ? { ...d, reason: v } : null))}
+        busy={accepting === declining?.jobId}
+      />
+    </>
   );
 }
 
 /* ── pieces ─────────────────────────────────────────────────────── */
 
 function OfferCard({
-  job, now, accepting, disabled, blockReason, onAccept, onDismiss,
+  job, now, accepting, disabled, blockReason, onAccept, onDismiss, onDecline,
 }: {
   job: ServiceRequest;
   now: number;
@@ -391,6 +431,7 @@ function OfferCard({
   blockReason?: string;
   onAccept: () => void;
   onDismiss: () => void;
+  onDecline: () => void;
 }) {
   const left = Math.max(0, OFFER_WINDOW_MS - (now - job.createdAt));
   const pct = (left / OFFER_WINDOW_MS) * 100;
@@ -417,16 +458,29 @@ function OfferCard({
 
           <div className="flex shrink-0 flex-col items-end gap-2">
             <div className={'stat-num text-h2 ' + (urgent ? 'text-gold-500' : 'text-aqua-500')}>{clock(left)}</div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                leftIcon={<X size={14} />}
-                onClick={onDismiss}
-                title="Hide this offer from your queue — the customer keeps waiting for a mechanic."
-              >
-                Hide
-              </Button>
+            <div className="flex flex-col items-end gap-2 w-full sm:w-auto">
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={<X size={14} />}
+                  onClick={onDismiss}
+                  title="Hide this offer from your queue — the customer keeps waiting for a mechanic."
+                  disabled={disabled && !accepting}
+                >
+                  Hide
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  leftIcon={<XCircle size={14} />}
+                  onClick={onDecline}
+                  title="Decline this offer — it will no longer appear in your queue."
+                  disabled={disabled && !accepting}
+                >
+                  Decline
+                </Button>
+              </div>
               <Button variant="live" size="sm" loading={accepting} disabled={disabled && !accepting} onClick={onAccept} title={blockReason}>Accept</Button>
             </div>
           </div>
@@ -434,6 +488,42 @@ function OfferCard({
         <Progress className="mt-4" value={pct} hue={urgent ? 'gold' : 'aqua'} />
       </Card>
     </li>
+  );
+}
+
+function DeclineModal({
+  open,
+  onClose,
+  onSubmit,
+  reason,
+  setReason,
+  busy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+  reason: string;
+  setReason: (v: string) => void;
+  busy: boolean;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title="Decline offer" size="sm">
+      <p className="text-small text-fg-muted mb-4">
+        You are about to decline this offer. It will no longer appear in your queue.
+        The customer will continue waiting for another mechanic.
+      </p>
+      <Textarea
+        label="Reason (optional)"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g., Too far, wrong specialty, unavailable..."
+        rows={3}
+      />
+      <div className="mt-6 flex justify-end gap-3">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="danger" size="sm" onClick={onSubmit} loading={busy}>Decline</Button>
+      </div>
+    </Modal>
   );
 }
 

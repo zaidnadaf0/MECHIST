@@ -27,12 +27,14 @@ const dot: Record<Hue, string> = {
   neutral: 'text-fg-subtle',
 };
 /**
- * Hairline metrics band. Deliberately *not* four cards — one panel divided by
+ * Illustrative metrics band — representative targets, not live telemetry.
+ * Deliberately *not* four cards — one panel divided by
  * 1px rules, so the first viewport ends on structure rather than more boxes.
  */
 export function HeroMetrics() {
   return (
     <div className="panel overflow-hidden rounded-xl">
+      <p className="sr-only">Representative service targets — not live platform telemetry.</p>
       <div className="grid divide-y divide-line-soft sm:grid-cols-2 sm:divide-y-0 lg:grid-cols-4">
         {METRICS.map(({ icon: Icon, hue, value, suffix, label, sub }, i) => (
           <div

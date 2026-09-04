@@ -6,7 +6,7 @@ import { FadeIn } from '@/components/motion';
 import { watchRequest, rateRequest, type ServiceRequest } from '@/lib/customer';
 import { useAuth } from '@/app/AuthProvider';
 import { distanceKm, kmToMin } from '@/lib/geo';
-import { MapView, Marker, Polyline, AutoFitBounds, RecenterButton } from '@/lib/map';
+import { ProviderMap } from '@/components/map/ProviderMap';
 
 const TIMELINE: Array<{ k: ServiceRequest['status']; label: string }> = [
   { k: 'requested',   label: 'Requested' },
@@ -95,9 +95,9 @@ export function Tracking() {
       <FadeIn>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="text-xs uppercase tracking-wider text-fg-muted">Service</div>
+            <div className="text-xs uppercase tracking-wider text-fg-muted">Service · live tracking</div>
             <h1 className="mt-2 display text-display-md text-fg-app">{req.id.slice(-6).toUpperCase()}</h1>
-            <p className="mt-1 text-small text-fg-muted">Created {new Date(req.createdAt).toLocaleString()}</p>
+            <p className="mt-1 text-small text-fg-muted">Created {new Date(req.createdAt).toLocaleString()} · follow the timeline below; distance is straight-line</p>
           </div>
           <Badge tone={req.status === 'completed' ? 'success' : 'brand'}>{req.status}</Badge>
         </div>
@@ -156,38 +156,23 @@ export function Tracking() {
         <Card className="mt-6">
           <h2 className="text-h2 text-fg-app">Live location</h2>
           <div className="mt-3 overflow-hidden rounded-xl">
-            <MapView
+            <ProviderMap
               center={[req.customerLat, req.customerLng]}
               zoom={14}
               className="aspect-[16/9] w-full"
-            >
-              <Marker position={[req.customerLat, req.customerLng]} tone="azure" label="You" />
-              {req.mechanicLat != null && req.mechanicLng != null && (
-                <Marker position={[req.mechanicLat, req.mechanicLng]} tone="aqua" label={req.mechanicName ?? 'Mechanic'} />
-              )}
-              {req.mechanicLat != null && req.mechanicLng != null && (
-                <Polyline
-                  positions={[
-                    [req.mechanicLat, req.mechanicLng],
-                    [req.customerLat, req.customerLng],
-                  ]}
-                  tone="aqua"
-                  weight={3}
-                  dashArray="6 8"
-                />
-              )}
-              <AutoFitBounds
-                points={
-                  req.mechanicLat != null && req.mechanicLng != null
-                    ? [
-                        [req.customerLat, req.customerLng],
-                        [req.mechanicLat, req.mechanicLng],
-                      ]
-                    : [[req.customerLat, req.customerLng]]
-                }
-              />
-              <RecenterButton center={[req.customerLat, req.customerLng]} />
-            </MapView>
+              userPosition={[req.customerLat, req.customerLng]}
+              userLabel="You"
+              mechanicMarkers={
+                req.mechanicLat != null && req.mechanicLng != null
+                  ? [{ id: 'mechanic', position: [req.mechanicLat, req.mechanicLng], label: req.mechanicName ?? 'Mechanic', tone: 'aqua' as const }]
+                  : []
+              }
+              line={
+                req.mechanicLat != null && req.mechanicLng != null
+                  ? [[req.mechanicLat, req.mechanicLng], [req.customerLat, req.customerLng]]
+                  : null
+              }
+            />
           </div>
         </Card>
       )}

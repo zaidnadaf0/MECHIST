@@ -49,9 +49,9 @@ export function Footer() {
             <FooterLink to="/admin/login">Staff sign-in</FooterLink>
           </FooterCol>
           <FooterCol title="Platform" hue="bg-aqua-500">
-            <FooterLink to="/#how-it-works">How it works</FooterLink>
+            <FooterLink to="/how-it-works">How it works</FooterLink>
+            <FooterLink to="/map">Live map</FooterLink>
             <FooterLink to="/mechanics">Mechanic network</FooterLink>
-            <FooterLink to="/#realtime">Live tracking</FooterLink>
             <FooterLink to="/#trust">Trust &amp; safety</FooterLink>
           </FooterCol>
           <FooterCol title="Company" hue="bg-iris-500">

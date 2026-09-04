@@ -60,8 +60,25 @@ export interface MechanicProfile {
   baseLng?: number;
 }
 
-/** Live queue of jobs in 'requested' state, ordered by recency. */
-export function watchIncoming(cb: (jobs: ServiceRequest[]) => void): Unsubscribe | null {
+/**
+ * Live queue of jobs in 'requested' state, ordered by recency.
+ *
+ * Firestore has no `array-not-contains` / `array-does-not-contain`,
+ * so a server-side `where('declinedBy', 'not-contains', uid)` is
+ * not possible. The matching engine already excludes `declinedBy`
+ * on the server (`findEligibleMechanics(..., excludeUids)`), but
+ * the dispatch queue snapshot would still *deliver* the declined
+ * doc to the mechanic's listener. We hide it client-side here
+ * instead — no new composite index and no rules change required.
+ *
+ * Pass the current mechanic's uid as `excludeUid` so they never
+ * see a request they already declined. Callers that omit it keep
+ * the previous behaviour (no filtering).
+ */
+export function watchIncoming(
+  cb: (jobs: ServiceRequest[]) => void,
+  excludeUid?: string,
+): Unsubscribe | null {
   try {
     const d = requireDb();
     return onSnapshot(
@@ -69,7 +86,8 @@ export function watchIncoming(cb: (jobs: ServiceRequest[]) => void): Unsubscribe
       (snap) => {
         const jobs = snap.docs
           .map((s) => asRequest(s.id, s.data()))
-          .filter((j): j is ServiceRequest => Boolean(j));
+          .filter((j): j is ServiceRequest => Boolean(j))
+          .filter((j) => !excludeUid || !(j.declinedBy ?? []).includes(excludeUid));
         cb(jobs);
       },
       () => cb([]),

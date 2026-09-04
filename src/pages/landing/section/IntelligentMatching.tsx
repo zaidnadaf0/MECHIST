@@ -88,21 +88,22 @@ export function IntelligentMatching() {
   const candidate = CANDIDATES[vehicle];
   const reasons =
     vehicle === 'ev'
-      ? ['High-voltage certified', 'Specialty matches', 'In service area']
+      ? ['High-voltage certified', 'Specialty matches', 'Straight-line distance']
       : vehicle === 'hybrid'
         ? ['Hybrid certified', 'Specialty matches', 'Vehicle supported']
-        : ['Specialty matches', 'Vehicle supported', 'Strong rating'];
+        : ['Specialty matches', 'Vehicle supported', 'Straight-line ETA'];
 
   return (
     <SectionShell id="matching" className="container section">
       <FadeIn>
         <SectionHeading
           hue="iris"
-          eyebrow={<><Cpu size={13} aria-hidden /> Ranking engine · multi-factor filter</>}
+          eyebrow={<><Cpu size={13} aria-hidden /> Matching · illustrative preview</>}
           title={<>The right mechanic for the <span className="text-gradient-signal">exact failure mode.</span></>}
-          description="Specialization, vehicle type, live distance, and current workload narrow the roster. Acceptance history and rating settle the final order."
+          description="Below is an illustrative preview of how filtering works. Live matching uses the same filters on real mechanics and shows straight-line estimates."
         />
       </FadeIn>
+      <p className="sr-only">Candidate dossier below is illustrative preview data, not a live assignment. Live availability, distance and ETA are on /map and /mechanics.</p>
 
       <div className="mt-10 grid gap-6 lg:grid-cols-12">
         {/* Selectors + diagram */}

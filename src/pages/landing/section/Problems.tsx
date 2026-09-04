@@ -29,14 +29,14 @@ interface Problem {
 }
 
 const PROBLEMS: Problem[] = [
-  { id: 'battery',    label: '12V / HV Battery',  blurb: 'Jump-start, replacement, or high-voltage isolation.', Glyph: BatteryGlyph,   tone: 'gold',    typical: '~ 20 min on site' },
-  { id: 'tyre',       label: 'Flat tyre',         blurb: 'Bead repair, swap with spare, or runflat re-inflate.', Glyph: TyreGlyph,      tone: 'azure',   typical: '~ 25 min on site' },
-  { id: 'engine',     label: 'Engine fault',      blurb: 'Diagnostic scan, sensor bypass, ignition repair.',   Glyph: EngineGlyph,    tone: 'iris',    typical: '~ 35 min on site' },
-  { id: 'fuel',       label: 'Out of fuel',       blurb: 'Diesel or petrol top-up delivered to your tank.',     Glyph: FuelGlyph,      tone: 'aqua',    typical: '~ 15 min on site' },
-  { id: 'overheat',   label: 'Overheating',       blurb: 'Coolant top-up, leak isolation, fan diagnostics.',    Glyph: OverheatGlyph,  tone: 'warning', typical: '~ 30 min on site' },
-  { id: 'electrical', label: 'Electrical',        blurb: 'Battery, alternator, or wiring fault isolation.',     Glyph: ElectricalGlyph, tone: 'gold',   typical: '~ 30 min on site' },
+  { id: 'battery',    label: '12V / HV Battery',  blurb: 'Jump-start, replacement, or high-voltage isolation.', Glyph: BatteryGlyph,   tone: 'gold',    typical: 'est. on site' },
+  { id: 'tyre',       label: 'Flat tyre',         blurb: 'Bead repair, swap with spare, or runflat re-inflate.', Glyph: TyreGlyph,      tone: 'azure',   typical: 'est. on site' },
+  { id: 'engine',     label: 'Engine fault',      blurb: 'Diagnostic scan, sensor bypass, ignition repair.',   Glyph: EngineGlyph,    tone: 'iris',    typical: 'est. on site' },
+  { id: 'fuel',       label: 'Out of fuel',       blurb: 'Diesel or petrol top-up delivered to your tank.',     Glyph: FuelGlyph,      tone: 'aqua',    typical: 'est. on site' },
+  { id: 'overheat',   label: 'Overheating',       blurb: 'Coolant top-up, leak isolation, fan diagnostics.',    Glyph: OverheatGlyph,  tone: 'warning', typical: 'est. on site' },
+  { id: 'electrical', label: 'Electrical',        blurb: 'Battery, alternator, or wiring fault isolation.',     Glyph: ElectricalGlyph, tone: 'gold',   typical: 'est. on site' },
   { id: 'accident',   label: 'Accident',          blurb: 'Safety perimeter, scene report, recovery dispatch.',  Glyph: AccidentGlyph,  tone: 'danger',  typical: 'Recovery coordinated' },
-  { id: 'other',      label: 'Other',             blurb: 'Lockout, key, tow, or anything in between.',          Glyph: OtherGlyph,     tone: 'neutral', typical: 'Quote on request' },
+  { id: 'other',      label: 'Other',             blurb: 'Lockout, key, tow, or anything in between.',          Glyph: OtherGlyph,     tone: 'neutral', typical: 'Quoted on request' },
 ];
 
 export function Problems() {

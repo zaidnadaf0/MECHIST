@@ -20,30 +20,30 @@ interface Pillar {
 const PILLARS: Pillar[] = [
   {
     icon: ShieldCheck,
-    t: 'Vetted mechanics',
-    d: 'Every technician passes a criminal background check, motor vehicle record check, and a documented ride-along audit before they’re routed to you.',
-    tag: '100% VERIFIED',
+    t: 'Mechanic review',
+    d: 'Mechanics submit specialties, vehicle types and base location; admin approval is required before they appear in the public directory or dispatch queue.',
+    tag: 'REVIEWED',
     tone: 'azure',
   },
   {
     icon: CreditCard,
-    t: 'Locked-upfront pricing',
-    d: 'Your repair estimate is fixed before dispatch. The final receipt cannot exceed it, and the funds are held in escrow until you mark the service complete.',
-    tag: 'ZERO SURGE',
+    t: 'Pay on completion',
+    d: 'Requesting is free. You confirm the service on the tracking page and the record is archived in history — no hidden fees are invented here.',
+    tag: 'ON COMPLETION',
     tone: 'aqua',
   },
   {
     icon: EyeOff,
-    t: 'Ephemeral location',
-    d: 'We only store your GPS coordinates for the lifetime of an active request. When the service wraps, the precise trail is cryptographically expunged.',
-    tag: 'PRIVACY FIRST',
+    t: 'Location on request',
+    d: 'Your GPS fix is shared with the assigned mechanic only after they accept the job. No background tracking is left running after completion.',
+    tag: 'REQUEST-ONLY',
     tone: 'iris',
   },
   {
     icon: Headphones,
-    t: 'Human supervisors',
-    d: 'When dispatch needs judgement — wrong address, parts dispute, or a non-standard repair — a senior coordinator picks up the line in under 15 seconds.',
-    tag: '24/7 COMMAND',
+    t: 'Status you can follow',
+    d: 'Every request moves through requested → accepted → on-the-way → arrived → service → completed so you always know where things stand.',
+    tag: 'TRACKED',
     tone: 'gold',
   },
 ];
@@ -54,12 +54,12 @@ export function Trust() {
       <FadeIn>
         <SectionHeading
           hue="azure"
-          eyebrow={<><Lock size={13} aria-hidden /> Assurance architecture & guarantees</>}
+          eyebrow={<><Lock size={13} aria-hidden /> Assurance & how the app works</>}
           title={<>Trust, built in <span className="text-gradient-signal">verifiable layers.</span></>}
-          description="Roadside breakdowns are stressful. MECHIST removes the ambiguity with upfront locked pricing, verified technician dossiers, and explicit data handling."
+          description="What MECHIST actually does with your request, location and mechanic assignment — no invented guarantees, just the real behavior you can verify in the app."
           actions={
-            <Badge tone="success" size="md" dot>
-              $2M comprehensive policy
+            <Badge tone="neutral" size="md">
+              illustrated · live on /map &amp; /mechanics
             </Badge>
           }
         />

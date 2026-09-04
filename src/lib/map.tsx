@@ -8,6 +8,9 @@ interface MapProps {
   center: [number, number];
   zoom?: number;
   className?: string;
+  tileUrl?: string;
+  attribution?: string;
+  onTileError?: () => void;
   children?: ReactNode;
 }
 
@@ -15,6 +18,12 @@ export const OSM_TILES = {
   url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
   attribution: '&copy; <a href="https://www.openstreet.org/copyright">OpenStreetMap</a> contributors',
 } as const;
+
+export function TileLayer({ url, attribution, onTileError }: { url: string; attribution: string; onTileError?: () => void }) {
+  const Mod = useReactLeaflet();
+  if (!Mod) return null;
+  return <Mod.TileLayer url={url} attribution={attribution} eventHandlers={onTileError ? { tileerror: onTileError } : undefined} />;
+}
 
 /**
  * Module context for react-leaflet. MapView sets this once on mount;
@@ -39,7 +48,7 @@ function useReactLeaflet(): ReactLeafletModule | null {
  * as children. All of these read react-leaflet from the context set
  * here, so they render in the same paint as the map tiles.
  */
-export function MapView({ center, zoom = 13, className, children }: MapProps) {
+export function MapView({ center, zoom = 13, className, tileUrl, attribution, onTileError, children }: MapProps) {
   const [Mod, setMod] = useState<ReactLeafletModule | null>(null);
   const [loadError, setLoadError] = useState(false);
 
@@ -65,12 +74,14 @@ export function MapView({ center, zoom = 13, className, children }: MapProps) {
       </div>
     );
   }
-  const { MapContainer, TileLayer } = Mod;
+  const { MapContainer } = Mod;
+  const effectiveTileUrl = tileUrl ?? OSM_TILES.url;
+  const effectiveAttribution = attribution ?? OSM_TILES.attribution;
   return (
     <div className={(className ?? 'aspect-[16/10]') + ' relative w-full overflow-hidden rounded-xl'}>
       <ReactLeafletContext.Provider value={Mod}>
         <MapContainer center={center} zoom={zoom} style={{ height: '100%', width: '100%' }} scrollWheelZoom={false}>
-          <TileLayer url={OSM_TILES.url} attribution={OSM_TILES.attribution} />
+          <Mod.TileLayer url={effectiveTileUrl} attribution={effectiveAttribution} eventHandlers={onTileError ? { tileerror: onTileError } : undefined} />
           {children}
         </MapContainer>
       </ReactLeafletContext.Provider>

@@ -13,12 +13,12 @@ import { Particles } from '@/components/magicui';
 import { STATUS_META, type CanonicalStatus } from '@/lib/requestStatus';
 
 const STAGES: { status: CanonicalStatus; blurb: string }[] = [
-  { status: 'requested',  blurb: 'You shared your location and what went wrong. Nearby mechanics with the right tools see your request immediately.' },
-  { status: 'accepted',   blurb: 'A vetted technician accepts. Their name, vehicle, and equipment payload appear on your screen.' },
-  { status: 'on-the-way', blurb: 'Live map shows bearing, speed, and corridor ETA. The estimate updates with traffic; the bill never does.' },
-  { status: 'arrived',    blurb: 'The mechanic is on site. You see a safety perimeter and the diagnostic they are running.' },
-  { status: 'service',    blurb: 'The repair is in progress. You receive a one-line status on every step change.' },
-  { status: 'completed',  blurb: 'Service complete. You review the itemised receipt, rate the experience, and the invoice is archived.' },
+  { status: 'requested',  blurb: 'You shared your location and category. Nearby available mechanics matched by specialty and vehicle type see the request.' },
+  { status: 'accepted',   blurb: 'A mechanic accepts; their profile becomes visible and the timeline advances. You stay on /track/:id.' },
+  { status: 'on-the-way', blurb: 'Live map and timeline follow on-the-way. Distance and ETA shown are straight-line estimates, not road routing.' },
+  { status: 'arrived',    blurb: 'Mechanic marks arrived. You see the status update on your tracking page.' },
+  { status: 'service',    blurb: 'Service is in progress. The same canonical timeline powers both customer and mechanic views.' },
+  { status: 'completed',  blurb: 'Service completed. The record is archived to history for both sides.' },
 ];
 
 export function RealtimeAssistance() {
@@ -28,8 +28,8 @@ export function RealtimeAssistance() {
 
   return (
     <SectionShell id="realtime" className="container section relative isolate">
-      {/* Network graph — a slow, calm connection-cloud behind the stage
-          inspector. Sits at z-0 with no pointer events. */}
+      {/* Network graph — illustrative connection-cloud behind the stage
+          inspector. Live telemetry is on the tracking pages. */}
       <Particles
         count={45}
         color="rgb(34 199 194)"
@@ -40,14 +40,15 @@ export function RealtimeAssistance() {
       <FadeIn>
         <SectionHeading
           hue="aqua"
-          eyebrow={<><Signal size={13} aria-hidden /> Live tracking · request telemetry</>}
-          title={<>Live status from the moment you <span className="text-gradient-signal">tap dispatch.</span></>}
-          description="No hold music. No vague “someone is on the way”. The same canonical six-step timeline powers your customer page and the mechanic portal — so what you see is what they see."
+          eyebrow={<><Signal size={13} aria-hidden /> Live tracking · illustrative preview</>}
+          title={<>Status that stays in sync from <span className="text-gradient-signal">request to completed.</span></>}
+          description="The same canonical timeline powers your customer page and the mechanic portal — what you see is what they see. Below is the shape of that timeline; live data is on your tracking page."
           actions={
-            <Badge tone="aqua" size="md" live>live feed</Badge>
+            <Badge tone="neutral" size="md">illustrative</Badge>
           }
         />
       </FadeIn>
+      <p className="sr-only">Telemetry values below are illustrative previews, not live data. Live status is on /track/:id and /mechanic/job/:id.</p>
 
       <div className="mt-10 grid gap-6 lg:grid-cols-12">
         {/* Clickable stage list */}
@@ -124,25 +125,25 @@ export function RealtimeAssistance() {
               </div>
 
               <div className="mt-6 space-y-2.5 font-mono text-xs">
-                <div className="eyebrow text-fg-subtle">Live telemetry</div>
+                <div className="eyebrow text-fg-subtle">Illustrative telemetry</div>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="rounded-lg border border-line-soft bg-surface-2/60 p-3">
-                    <div className="text-[10px] uppercase text-fg-subtle">Transit velocity</div>
+                    <div className="text-[10px] uppercase text-fg-subtle">Straight-line preview</div>
                     <div className="mt-0.5 inline-flex items-center gap-1.5 text-small font-bold text-fg-app">
-                      <Truck size={13} className="text-aqua-400" /> 52 km/h
+                      <Truck size={13} className="text-aqua-400" /> ~52 km/h est.
                     </div>
                   </div>
                   <div className="rounded-lg border border-line-soft bg-surface-2/60 p-3">
-                    <div className="text-[10px] uppercase text-fg-subtle">Bearing</div>
+                    <div className="text-[10px] uppercase text-fg-subtle">Preview bearing</div>
                     <div className="mt-0.5 inline-flex items-center gap-1.5 text-small font-bold text-gold-400">
-                      <MapPin size={13} /> 042° NE
+                      <MapPin size={13} /> 042° NE · sample
                     </div>
                   </div>
                 </div>
                 <div className="rounded-lg border border-line-soft bg-surface-2/60 p-3">
-                  <div className="text-[10px] uppercase text-fg-subtle">Estimated arrival</div>
+                  <div className="text-[10px] uppercase text-fg-subtle">Estimated arrival · straight-line</div>
                   <div className="mt-0.5 inline-flex items-center gap-1.5 text-small font-bold text-fg-app">
-                    <Clock size={13} className="text-aqua-400" /> 6.5 min
+                    <Clock size={13} className="text-aqua-400" /> ~6.5 min · illustrative
                   </div>
                 </div>
               </div>

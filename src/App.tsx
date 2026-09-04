@@ -8,6 +8,8 @@ import { Lightning } from '@/components/effects';
 import { useSmoothScroll } from '@/components/motion';
 import { useAuth, type AppRole } from '@/app/AuthProvider';
 import { LandingPage } from '@/pages/landing/LandingPage';
+import { HowItWorksPage } from '@/pages/landing/HowItWorksPage';
+import { MapPage } from '@/pages/MapPage';
 import { AuthPage } from '@/pages/auth/AuthPage';
 import { AdminLogin } from '@/pages/auth/AdminLogin';
 import { CustomerLogin } from '@/pages/auth/CustomerLogin';
@@ -117,6 +119,8 @@ export default function App() {
             <Route path="/signup/mechanic" element={<MechanicSignup />} />
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/mechanics" element={<MechanicDirectory />} />
+            <Route path="/map" element={<MapPage />} />
+            <Route path="/how-it-works" element={<HowItWorksPage />} />
 
             <Route path="/dashboard"  element={<RequireAuth requireRole="customer"><ErrorBoundary label="Customer"><CustomerDashboard /></ErrorBoundary></RequireAuth>} />
             <Route path="/request"    element={<RequireAuth requireRole="customer"><ErrorBoundary label="Customer"><RequestFlow /></ErrorBoundary></RequireAuth>} />

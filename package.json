@@ -12,7 +12,11 @@
     "lint": "echo \"(lint placeholder — wire eslint when desired)\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint:rules": "node scripts/check-rules.mjs"
+    "lint:rules": "node scripts/check-rules.mjs",
+    "verify:phaseB": "node scripts/phaseB-verify.mjs --unit",
+    "verify:all": "npm run lint:rules && npm run verify:phaseB && npm run test",
+    "emulators": "firebase emulators:start --only firestore,functions,auth,pubsub,storage --import=./emulator-data --export-on-exit 2>&1 | cat",
+    "emulators:clean": "firebase emulators:start --only firestore,functions,auth,pubsub,storage 2>&1 | cat"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

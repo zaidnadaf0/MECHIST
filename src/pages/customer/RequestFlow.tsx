@@ -24,7 +24,7 @@ import { EmptyState, ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import { useGeolocation, type GeoState } from '@/lib/geolocation';
-import { MapView, Marker, RecenterButton } from '@/lib/map';
+import { ProviderMap } from '@/components/map/ProviderMap';
 import { listVehicles, createRequest, type Vehicle } from '@/lib/customer';
 import { listAllPublicMechanics } from '@/lib/public';
 import type { MechanicProfile } from '@/lib/mechanic';
@@ -367,13 +367,14 @@ function StepLocation({ geo, requestGeo }: {
     return (
       <div className="flex flex-col gap-3">
         <p className="text-small text-fg-muted">
-          We need your location to find mechanics within range. Your location is shared with the mechanic only when they accept the job.
+          We need your location to find mechanics nearby. Your fix is shared with the mechanic only after they accept. <span className="text-fg-subtle">Tip: allow browser location on this step for the best match.</span>
         </p>
         <div>
           <Button variant="primary" onClick={requestGeo} loading={geo.status === 'requesting'}>
             Use my location
           </Button>
         </div>
+        <p className="text-xs text-fg-subtle">Safety: if you are on a road, move to a safe spot and turn on hazard lights before sharing location.</p>
       </div>
     );
   }
@@ -387,20 +388,20 @@ function StepLocation({ geo, requestGeo }: {
     <div className="flex flex-col gap-3">
       <div className="flex items-center gap-2">
         <span aria-hidden className="grid h-2 w-2 rounded-full bg-success-500" />
-        <span className="eyebrow text-success-700 dark:text-success-300">Location confirmed</span>
+        <span className="eyebrow text-success-700 dark:text-success-300">Location confirmed · map uses Geoapify when configured, otherwise OpenStreetMap</span>
       </div>
       <p className="text-small text-fg-muted">
         {geo.coords?.lat.toFixed(5)}, {geo.coords?.lng.toFixed(5)} (±{Math.round(geo.coords?.accuracy ?? 0)} m)
       </p>
+      <p className="text-xs text-fg-subtle">Distance and ETA on the next step are straight-line estimates, not road routing.</p>
       <div className="overflow-hidden rounded-xl border border-line-soft">
-        <MapView
+        <ProviderMap
           center={[geo.coords!.lat, geo.coords!.lng]}
           zoom={15}
           className="aspect-[16/9] w-full"
-        >
-          <Marker position={[geo.coords!.lat, geo.coords!.lng]} tone="azure" label="You" />
-          <RecenterButton center={[geo.coords!.lat, geo.coords!.lng]} />
-        </MapView>
+          userPosition={[geo.coords!.lat, geo.coords!.lng]}
+          userLabel="You"
+        />
       </div>
     </div>
   );

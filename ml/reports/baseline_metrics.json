@@ -1,0 +1,39 @@
+{
+  "seed": 42,
+  "weights": {
+    "num__rating": 0.8,
+    "num__active_jobs": -0.9,
+    "num__completion_rate": 0.6,
+    "num__eta_min": -0.6,
+    "num__distance_km": -1.5,
+    "num__specialty_match": 2.0,
+    "num__vehicle_match": 1.0,
+    "num__within_service_radius": 1.2,
+    "cat__availability__available": 0.7
+  },
+  "splits": {
+    "train": {
+      "groups": 350,
+      "Hit@1": 0.8171428571428572,
+      "Hit@3": 0.9942857142857143,
+      "NDCG@3": 0.9235857128665652,
+      "NDCG@5": 0.9260467217698418
+    },
+    "val": {
+      "groups": 75,
+      "Hit@1": 0.6666666666666666,
+      "Hit@3": 1.0,
+      "NDCG@3": 0.8682479342857221,
+      "NDCG@5": 0.8682479342857221
+    },
+    "test": {
+      "groups": 75,
+      "Hit@1": 0.84,
+      "Hit@3": 0.9733333333333334,
+      "NDCG@3": 0.9241239671428608,
+      "NDCG@5": 0.9356086753581514
+    }
+  },
+  "sha256_feature_matrix": "160d9352bd471ee375e7cf15d5d9c64dc1329339ae2736db403a0fb12fdc6aa4",
+  "sha256_schema": "b82cc40c501ac83a74cacd4c445963f18a4f37af7bcf7401aaf04192ba2a43a1"
+}

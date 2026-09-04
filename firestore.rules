@@ -147,6 +147,32 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'mechanicLat', 'mechanicLng', 'etaMin',
                         'rating', 'comment', 'ratedAt', 'updatedAt'])) ||
+        // Mechanic declines an open offer (status == 'requested', no mechanic assigned).
+        // Appends their UID to declinedBy[] and updates updatedAt.
+        (resource.data.status == 'requested'
+          && (resource.data.mechanicId == null || resource.data.mechanicId == '')
+          && isMechanicApproved()
+          && request.resource.data.status == 'requested'
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['declinedBy', 'updatedAt'])) ||
+        // Mechanic releases an accepted job back to the queue.
+        // Only the assigned mechanic can do this from releasable states.
+        // Resets status to 'requested', clears mechanicId/mechanicName/mechanicLat/mechanicLng,
+        // extends offerExpiresAt, writes releaseReason and releasedAt.
+        (resource.data.mechanicId == request.auth.uid
+          && isMechanic()
+          && resource.data.status in ['accepted', 'on-the-way', 'arrived', 'service']
+          && request.resource.data.status == 'requested'
+          && request.resource.data.mechanicId == null
+          && request.resource.data.mechanicName == null
+          && request.resource.data.mechanicLat == null
+          && request.resource.data.mechanicLng == null
+          && request.resource.data.offerExpiresAt is number
+          && request.resource.data.releaseReason is string
+          && request.resource.data.releasedAt is number
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'mechanicId', 'mechanicName', 'mechanicLat',
+                        'mechanicLng', 'offerExpiresAt', 'releaseReason', 'releasedAt', 'updatedAt'])) ||
         // Mechanic records the accept transition. The previous
         // mechanicId must be null/empty (i.e. this is the first time
         // anyone is picking it up) and the new value must be the

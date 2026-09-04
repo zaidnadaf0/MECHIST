@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card, Badge, Button, useToast } from '@/components/ui';
+import { Card, Badge, Button, useToast, Modal, Textarea } from '@/components/ui';
 import { ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import { watchRequest, type ServiceRequest } from '@/lib/customer';
-import { updateJobStatus, pushMechanicLocation, pushMechanicLocationToRequest, type JobStatus } from '@/lib/mechanic';
+import { updateJobStatus, pushMechanicLocation, pushMechanicLocationToRequest, releaseJob, type JobStatus } from '@/lib/mechanic';
 import { useWatchPosition } from '@/lib/geolocation';
-import { MapView, Marker, AutoFitBounds, RecenterButton } from '@/lib/map';
+import { ProviderMap } from '@/components/map/ProviderMap';
 
 const NEXT_STATUS: Record<JobStatus, JobStatus | null> = {
   'accepted':   'on-the-way',
@@ -35,6 +35,7 @@ export function MechanicJob() {
   const toast = useToast();
   const [job, setJob] = useState<ServiceRequest | null | 'loading'>('loading');
   const [busy, setBusy] = useState(false);
+  const [releasing, setReleasing] = useState<{ reason: string } | null>(null);
   const [geo] = useWatchPosition(LIVE_THROTTLE);
   const lastPushedRef = useRef<{ lat: number; lng: number } | null>(null);
 
@@ -132,6 +133,36 @@ export function MechanicJob() {
     }
   };
 
+  const onReleaseOpen = () => {
+    setReleasing({ reason: '' });
+  };
+
+  const onReleaseSubmit = async () => {
+    if (!releasing || !user) return;
+    setBusy(true);
+    const result = await releaseJob(job.id, user.uid, releasing.reason);
+    setBusy(false);
+    setReleasing(null);
+    if (result === 'released') {
+      toast.push({ title: 'Job released', description: 'The job is back in the dispatch queue.', tone: 'success' });
+      navigate('/mechanic');
+      return;
+    }
+    if (result === 'forbidden') {
+      toast.push({ title: 'Cannot release', description: 'You are not assigned to this job.', tone: 'danger' });
+      return;
+    }
+    if (result === 'not_assigned') {
+      toast.push({ title: 'Cannot release', description: 'You are not assigned to this job.', tone: 'danger' });
+      return;
+    }
+    if (result === 'invalid_state') {
+      toast.push({ title: 'Cannot release', description: 'This job cannot be released in its current state.', tone: 'danger' });
+      return;
+    }
+    toast.push({ title: 'Could not release', description: 'Please try again.', tone: 'danger' });
+  };
+
   const liveTracking = LIVE_STATUSES.has(job.status);
 
   return (
@@ -167,10 +198,15 @@ export function MechanicJob() {
         <Card>
           <h2 className="text-h2 text-fg-app">Actions</h2>
           {next ? (
-            <div className="mt-3">
+            <div className="mt-3 space-y-2">
               <Button variant="primary" size="lg" fullWidth loading={busy} onClick={advance}>
                 Mark as {LABEL[next].toLowerCase()}
               </Button>
+              {LIVE_STATUSES.has(job.status) && (
+                <Button variant="secondary" size="md" fullWidth loading={busy} onClick={onReleaseOpen}>
+                  Can't take this
+                </Button>
+              )}
               <p className="mt-3 text-xs text-fg-muted">Customer is notified instantly.</p>
             </div>
           ) : (
@@ -182,24 +218,23 @@ export function MechanicJob() {
       <Card className="mt-6">
         <h2 className="text-h2 text-fg-app">Customer location</h2>
         <div className="mt-3 overflow-hidden rounded-xl">
-          <MapView
+          <ProviderMap
             center={[job.customerLat, job.customerLng]}
             zoom={14}
             className="aspect-[16/9] w-full"
-          >
-            <Marker position={[job.customerLat, job.customerLng]} tone="azure" label="Customer" />
-            {job.mechanicLat != null && job.mechanicLng != null && (
-              <Marker position={[job.mechanicLat, job.mechanicLng]} tone="aqua" label="You" />
-            )}
-            <AutoFitBounds
-              points={
-                job.mechanicLat != null && job.mechanicLng != null
-                  ? [[job.customerLat, job.customerLng], [job.mechanicLat, job.mechanicLng]]
-                  : [[job.customerLat, job.customerLng]]
-              }
-            />
-            <RecenterButton center={[job.customerLat, job.customerLng]} />
-          </MapView>
+            userPosition={
+              job.mechanicLat != null && job.mechanicLng != null
+                ? [job.mechanicLat, job.mechanicLng]
+                : null
+            }
+            userLabel="You"
+            mechanicMarkers={[{ id: 'customer', position: [job.customerLat, job.customerLng], label: 'Customer', tone: 'azure' as const }]}
+            line={
+              job.mechanicLat != null && job.mechanicLng != null
+                ? [[job.mechanicLat, job.mechanicLng], [job.customerLat, job.customerLng]]
+                : null
+            }
+          />
         </div>
         {liveTracking && (
           <p className="mt-2 text-xs text-fg-muted">
@@ -207,6 +242,14 @@ export function MechanicJob() {
           </p>
         )}
       </Card>
+      <ReleaseModal
+        open={!!releasing}
+        onClose={() => setReleasing(null)}
+        onSubmit={onReleaseSubmit}
+        reason={releasing?.reason ?? ''}
+        setReason={(v) => setReleasing({ reason: v })}
+        busy={busy}
+      />
     </main>
   );
 }
@@ -217,5 +260,41 @@ function Field({ label, value }: { label: string; value: string }) {
       <div className="text-xs uppercase tracking-wider text-fg-muted">{label}</div>
       <div className="mt-1 text-fg-app">{value}</div>
     </div>
+  );
+}
+
+function ReleaseModal({
+  open,
+  onClose,
+  onSubmit,
+  reason,
+  setReason,
+  busy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+  reason: string;
+  setReason: (v: string) => void;
+  busy: boolean;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title="Release job" size="sm">
+      <p className="text-small text-fg-muted mb-4">
+        You are about to release this job back to the dispatch queue.
+        Another mechanic will be able to accept it.
+      </p>
+      <Textarea
+        label="Reason (optional)"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        placeholder="e.g., Vehicle issue, personal emergency, wrong location..."
+        rows={3}
+      />
+      <div className="mt-6 flex justify-end gap-3">
+        <Button variant="ghost" size="sm" onClick={onClose} disabled={busy}>Cancel</Button>
+        <Button variant="danger" size="sm" onClick={onSubmit} loading={busy}>Release</Button>
+      </div>
+    </Modal>
   );
 }

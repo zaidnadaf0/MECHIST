@@ -7,6 +7,7 @@
  * three.js map on a marketing page.
  */
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Compass, MapPin, Navigation, Shield } from 'lucide-react';
 import { SectionShell, SectionHeading, Card, Badge, Button } from '@/components/ui';
 import { FadeIn } from '@/components/motion';
@@ -23,14 +24,14 @@ interface City {
 }
 
 const CITIES: City[] = [
-  { id: 'lhr', name: 'Lahore',         units: 320, medianEta: '7 min',  coords: '31.5204° N, 74.3587° E',  cx: 56, cy: 44 },
-  { id: 'khi', name: 'Karachi',        units: 280, medianEta: '9 min',  coords: '24.8607° N, 67.0011° E',  cx: 38, cy: 76 },
-  { id: 'isb', name: 'Islamabad',      units: 180, medianEta: '8 min',  coords: '33.6844° N, 73.0479° E',  cx: 55, cy: 26 },
-  { id: 'fsd', name: 'Faisalabad',     units:  90, medianEta: '10 min', coords: '31.4504° N, 73.1350° E',  cx: 52, cy: 40 },
-  { id: 'mux', name: 'Multan',         units:  60, medianEta: '11 min', coords: '30.1575° N, 71.5249° E',  cx: 47, cy: 56 },
-  { id: 'pwr', name: 'Peshawar',       units:  70, medianEta: '9 min',  coords: '34.0150° N, 71.5249° E',  cx: 48, cy: 18 },
-  { id: 'qta', name: 'Quetta',         units:  40, medianEta: '13 min', coords: '30.1798° N, 66.9750° E',  cx: 28, cy: 56 },
-  { id: 'hyd', name: 'Hyderabad (S)',  units:  55, medianEta: '10 min', coords: '25.3960° N, 68.3578° E',  cx: 42, cy: 82 },
+  { id: 'kor', name: 'Koramangala',    units: 320, medianEta: '7 min',  coords: '12.9352° N, 77.6245° E',  cx: 52, cy: 58 },
+  { id: 'wht', name: 'Whitefield',     units: 280, medianEta: '9 min',  coords: '12.9698° N, 77.7500° E',  cx: 74, cy: 48 },
+  { id: 'ec',  name: 'Electronic City',units: 180, medianEta: '8 min',  coords: '12.8456° N, 77.6603° E',  cx: 56, cy: 78 },
+  { id: 'ind', name: 'Indiranagar',    units:  90, medianEta: '10 min', coords: '12.9784° N, 77.6408° E',  cx: 54, cy: 42 },
+  { id: 'yel', name: 'Yelahanka',      units:  70, medianEta: '9 min',  coords: '13.1007° N, 77.5963° E',  cx: 48, cy: 18 },
+  { id: 'jay', name: 'Jayanagar',      units:  60, medianEta: '11 min', coords: '12.9279° N, 77.6271° E',  cx: 52, cy: 62 },
+  { id: 'heb', name: 'Hebbal',         units:  40, medianEta: '13 min', coords: '13.0358° N, 77.5970° E',  cx: 49, cy: 28 },
+  { id: 'mar', name: 'Marathahalli',   units:  55, medianEta: '10 min', coords: '12.9591° N, 77.6974° E',  cx: 64, cy: 50 },
 ];
 
 export function LocationSection() {
@@ -42,11 +43,16 @@ export function LocationSection() {
       <FadeIn>
         <SectionHeading
           hue="azure"
-          eyebrow={<><Navigation size={13} aria-hidden /> Coverage · 14 metros · onboarding</>}
+          eyebrow={<><Navigation size={13} aria-hidden /> Coverage · illustrative network preview</>}
           title={<>We work precisely where <span className="text-gradient-signal">you’re stranded.</span></>}
-          description="GPS coordinate lock from your browser — no app required. The platform retains your last known satellite fix so it can still reach you in cellular dead zones."
+          description="GPS coordinate lock from your browser — no app required. The platform retains your last known satellite fix so it can still reach you in cellular dead zones. Below is an illustrative preview; the live network is on the map."
         />
       </FadeIn>
+
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Link to="/map"><Button variant="primary" size="md" leftIcon={<MapPin size={16} />}>Explore the live map</Button></Link>
+        <Link to="/mechanics"><Button variant="secondary" size="md">Browse mechanics</Button></Link>
+      </div>
 
       <div className="mt-10 grid gap-6 lg:grid-cols-12">
         {/* Left: city inspector */}
@@ -59,12 +65,12 @@ export function LocationSection() {
                 </span>
                 <div>
                   <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-azure-300">
-                    Active city
+                    Illustrative city
                   </div>
-                  <div className="text-xs text-fg-muted">tap any node</div>
+                  <div className="text-xs text-fg-muted">representative figures</div>
                 </div>
               </div>
-              <Badge tone="azure" size="sm" live>live</Badge>
+              <Badge tone="neutral" size="sm">preview</Badge>
             </div>
 
             <h3 className="display mt-5 text-h2 font-bold text-fg-app">{focused.name}</h3>
@@ -72,14 +78,15 @@ export function LocationSection() {
 
             <div className="mt-5 grid grid-cols-2 gap-3 rounded-lg border border-line-soft bg-surface-2/60 p-3 font-mono text-xs">
               <div>
-                <div className="text-[10px] text-fg-subtle">UNITS ONLINE</div>
-                <div className="mt-0.5 text-small font-semibold text-fg-app">{focused.units}</div>
+                <div className="text-[10px] text-fg-subtle">ILLUSTRATIVE UNITS</div>
+                <div className="mt-0.5 text-small font-semibold text-fg-app">{focused.units} · example</div>
               </div>
               <div>
-                <div className="text-[10px] text-fg-subtle">MEDIAN ETA</div>
-                <div className="mt-0.5 text-small font-semibold text-aqua-400">{focused.medianEta}</div>
+                <div className="text-[10px] text-fg-subtle">ILLUSTRATIVE ETA</div>
+                <div className="mt-0.5 text-small font-semibold text-aqua-400">{focused.medianEta} · example</div>
               </div>
             </div>
+            <p className="mt-2 text-[11px] text-fg-subtle">Live counts are shown on the map and mechanic directory — not here.</p>
 
             <div className="mt-6 flex items-center gap-2 text-small text-fg-muted">
               <Shield size={14} className="text-azure-400" />
@@ -87,11 +94,9 @@ export function LocationSection() {
             </div>
 
             <div className="mt-6 flex flex-wrap gap-3 border-t border-line-soft pt-4">
-              <Button variant="primary" size="md" leftIcon={<MapPin size={16} />}>
-                Request assistance
-              </Button>
+              <Link to="/map"><Button variant="primary" size="md" leftIcon={<MapPin size={16} />}>Open the live map</Button></Link>
               <Button variant="secondary" size="md" onClick={() => setActive(null)}>
-                Reset map
+                Reset preview
               </Button>
             </div>
           </Card>
@@ -149,7 +154,7 @@ export function LocationSection() {
 
             <div className="absolute left-4 top-4 flex items-center gap-2 rounded-md border border-line-soft bg-surface-app/80 px-2.5 py-1 font-mono text-[11px] text-fg-muted backdrop-blur">
               <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-aqua-500" />
-              live coverage · 14 metros
+              illustrative preview · live data on /map
             </div>
           </Card>
         </div>

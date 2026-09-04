@@ -117,9 +117,9 @@ export function MechanicNetwork() {
       <FadeIn>
         <SectionHeading
           hue="aqua"
-          eyebrow={<>Vetted roster · real-time availability</>}
+          eyebrow={<>Illustrative roster · sample units</>}
           title={<>Mechanics with the right tools, <span className="text-gradient-signal">ready to roll.</span></>}
-          description="Every technician is background-checked, insured up to $2M, and carries specialised equipment for modern electric and combustion drivetrains."
+          description="A sample of the roster shown for illustration — live availability and mechanic details are on the map and directory. Listing requires admin verification before a mechanic appears to customers."
           actions={
             <a href="/mechanics" className="inline-flex">
               <Button variant="secondary" size="md">View full directory</Button>
@@ -127,6 +127,7 @@ export function MechanicNetwork() {
           }
         />
       </FadeIn>
+      <p className="sr-only">Roster below is illustrative sample data, not live mechanics. Live data is on /map and /mechanics.</p>
 
       {/* category filter pills */}
       <div className="mt-8 flex flex-wrap items-center gap-2 rounded-xl border border-line-soft bg-surface-2/70 p-1.5 backdrop-blur-sm">

@@ -56,11 +56,12 @@ export function OperationsSnapshot() {
       <FadeIn>
         <SectionHeading
           hue="iris"
-          eyebrow={<><Activity size={13} aria-hidden /> Operations · live fleet picture</>}
+          eyebrow={<><Activity size={13} aria-hidden /> Operations · illustrative picture</>}
           title={<>The fleet at a glance. <span className="text-gradient-signal">No dashboards to wire up.</span></>}
-          description="A static picture of how the platform is performing right now. Customers and mechanics get the same data; the live version lives inside the admin operations center."
+          description="An illustrative snapshot of how the platform is performing. Live operational data is inside the admin operations center and on the live map."
         />
       </FadeIn>
+      <p className="sr-only">Operational figures below are illustrative preview targets, not live telemetry. Live data is on the map and admin dashboards.</p>
 
       <div className="mt-10 grid gap-4 md:grid-cols-12">
         {/* Active incidents + sparkline */}
