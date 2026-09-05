@@ -135,7 +135,7 @@ export function LocationSection() {
                           : 'border-azure-400/50 bg-[#0a121e] text-azure-300',
                       ].join(' ')}
                     >
-                      <MapPin size={12} />
+                      <MapPin size={14} strokeWidth={2} />
                     </span>
                     <span
                       className={[

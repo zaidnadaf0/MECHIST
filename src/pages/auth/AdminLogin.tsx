@@ -33,9 +33,15 @@ export function AdminLogin() {
   const [notAdmin, setNotAdmin] = useState(false);
   const [resetSent, setResetSent] = useState(false);
 
-  // If an admin is already signed in, send them straight to /admin.
+  // If an admin is already signed in, send them straight to /admin
+  // (or honour `?next=` if the guard sent them here).
   useEffect(() => {
-    if (user) navigate('/admin', { replace: true });
+    if (user) {
+      const sp = new URLSearchParams(window.location.search);
+      const next = sp.get('next');
+      const dest = next && next.startsWith('/') && !next.startsWith('//') ? next : '/admin';
+      navigate(dest, { replace: true });
+    }
   }, [user, navigate]);
 
   if (user) return null;

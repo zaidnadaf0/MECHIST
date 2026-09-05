@@ -95,8 +95,8 @@ export function HowItWorksPage() {
           })}
         </div>
         <div className="mt-4 flex flex-wrap gap-2 text-xs text-fg-subtle">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-surface-2 px-2.5 py-1"><Eye size={12} /> Track at <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/dashboard</Link></span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-surface-2 px-2.5 py-1"><Clock size={12} /> Live at <Link to="/mechanics" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/mechanics</Link></span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-surface-2 px-2.5 py-1"><Eye size={14} strokeWidth={2} /> Track at <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/dashboard</Link></span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-surface-2 px-2.5 py-1"><Clock size={14} strokeWidth={2} /> Live at <Link to="/mechanics" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/mechanics</Link></span>
         </div>
       </ScrollRevealSection>
 
@@ -180,7 +180,7 @@ export function HowItWorksPage() {
                 <li>Submit — an offer is live for two minutes.</li>
                 <li>Track on <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/track/:id</Link> and follow status updates.</li>
               </ol>
-              <p className="flex items-center gap-1.5 text-xs text-fg-subtle"><AlertTriangle size={12} /> No repair instructions — stay safe and wait for the mechanic.</p>
+              <p className="flex items-center gap-1.5 text-xs text-fg-subtle"><AlertTriangle size={14} strokeWidth={2} /> No repair instructions — stay safe and wait for the mechanic.</p>
             </div>
           </div>
         </Card>

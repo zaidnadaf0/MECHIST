@@ -195,10 +195,10 @@ export function MechanicNetwork() {
                 <div className="mt-5 flex items-center justify-between border-t border-line-soft pt-4 font-mono text-xs">
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-1 text-fg-subtle">
-                      <MapPin size={12} className="text-azure-400" /> {m.distanceKm.toFixed(1)} km
+                      <MapPin size={14} strokeWidth={2} className="text-azure-400" /> {m.distanceKm.toFixed(1)} km
                     </div>
                     <div className="flex items-center gap-1 font-semibold text-aqua-400">
-                      <Clock size={12} /> ETA {m.etaMin} min
+                      <Clock size={14} strokeWidth={2} /> ETA {m.etaMin} min
                     </div>
                   </div>
                   <Button

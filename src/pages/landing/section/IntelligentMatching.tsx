@@ -225,7 +225,7 @@ export function IntelligentMatching() {
                   </span>
                 </div>
                 <div className="flex items-center gap-1.5 rounded-md border border-azure-500/30 bg-azure-500/10 px-2.5 py-1 font-mono text-xs text-azure-300">
-                  <Sparkles size={12} />
+                  <Sparkles size={14} strokeWidth={2} />
                   <span>{candidate.matchPct}% match</span>
                 </div>
               </div>
@@ -268,7 +268,7 @@ export function IntelligentMatching() {
                       key={eq}
                       className="flex items-center gap-2 rounded border border-line-soft bg-surface-app/80 px-2.5 py-1.5 text-xs font-mono text-fg-app"
                     >
-                      <Wrench size={12} className="shrink-0 text-azure-400" />
+                      <Wrench size={14} strokeWidth={2} className="shrink-0 text-azure-400" />
                       {eq}
                     </li>
                   ))}

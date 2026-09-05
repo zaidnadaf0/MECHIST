@@ -49,30 +49,30 @@ const roleHue = {
 };
 
 const publicLinks: NavItem[] = [
-  { to: '/', label: 'Overview', icon: <Activity size={12} aria-hidden /> },
-  { to: '/how-it-works', label: 'How it works', icon: <Radar size={12} aria-hidden /> },
-  { to: '/map', label: 'Find Mechanics', icon: <MapPin size={12} aria-hidden /> },
-  { to: '/mechanics', label: 'Network', icon: <Users2 size={12} aria-hidden /> },
-  { to: '/#trust', label: 'Trust', icon: <ShieldCheck size={12} aria-hidden /> },
+  { to: '/', label: 'Overview', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/how-it-works', label: 'How it works', icon: <Radar size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/map', label: 'Find Mechanics', icon: <MapPin size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/mechanics', label: 'Network', icon: <Users2 size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/#trust', label: 'Trust', icon: <ShieldCheck size={14} strokeWidth={2} aria-hidden /> },
 ];
 
 const customerLinks: NavItem[] = [
-  { to: '/dashboard', label: 'Dashboard', icon: <Activity size={12} aria-hidden /> },
-  { to: '/vehicles', label: 'Vehicles', icon: <Truck size={12} aria-hidden /> },
-  { to: '/history', label: 'History', icon: <Activity size={12} aria-hidden /> },
+  { to: '/dashboard', label: 'Dashboard', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/vehicles', label: 'Vehicles', icon: <Truck size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/history', label: 'History', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
 ];
 
 const mechanicLinks: NavItem[] = [
-  { to: '/mechanic', label: 'Jobs', icon: <Radar size={12} aria-hidden /> },
-  { to: '/mechanic/history', label: 'History', icon: <Activity size={12} aria-hidden /> },
-  { to: '/mechanic/profile', label: 'Profile', icon: <ShieldCheck size={12} aria-hidden /> },
+  { to: '/mechanic', label: 'Jobs', icon: <Radar size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/mechanic/history', label: 'History', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/mechanic/profile', label: 'Profile', icon: <ShieldCheck size={14} strokeWidth={2} aria-hidden /> },
 ];
 
 const adminLinks: NavItem[] = [
-  { to: '/admin', label: 'Overview', icon: <Activity size={12} aria-hidden /> },
-  { to: '/admin/requests', label: 'Requests', icon: <Radar size={12} aria-hidden /> },
-  { to: '/admin/mechanics', label: 'Mechanics', icon: <Users2 size={12} aria-hidden /> },
-  { to: '/admin/users', label: 'Users', icon: <Users2 size={12} aria-hidden /> },
+  { to: '/admin', label: 'Overview', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/admin/requests', label: 'Requests', icon: <Radar size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/admin/mechanics', label: 'Mechanics', icon: <Users2 size={14} strokeWidth={2} aria-hidden /> },
+  { to: '/admin/users', label: 'Users', icon: <Users2 size={14} strokeWidth={2} aria-hidden /> },
 ];
 
 function linksForRole(role: AppRole | 'unknown', signedIn: boolean): NavItem[] {
@@ -83,9 +83,10 @@ function linksForRole(role: AppRole | 'unknown', signedIn: boolean): NavItem[] {
   return publicLinks;
 }
 
-function primaryCtaForRole(role: AppRole | 'unknown'): { to: string; label: string } {
+function primaryCtaForRole(role: AppRole | 'unknown', signedIn: boolean): { to: string; label: string } {
   if (role === 'mechanic') return { to: '/mechanic', label: 'Open portal' };
   if (role === 'admin')    return { to: '/admin', label: 'Control room' };
+  if (signedIn && role === 'customer') return { to: '/dashboard', label: 'Dashboard' };
   return { to: '/request', label: 'Get assistance' };
 }
 
@@ -102,7 +103,7 @@ export function TopNav() {
 
   const signedIn = Boolean(user);
   const links = linksForRole(role, signedIn);
-  const primaryCta = primaryCtaForRole(role);
+  const primaryCta = primaryCtaForRole(role, signedIn);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);

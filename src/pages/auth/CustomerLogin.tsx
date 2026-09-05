@@ -36,10 +36,15 @@ export function CustomerLogin() {
   const [wrongPortal, setWrongPortal] = useState<'mechanic' | 'admin' | null>(null);
 
   // If the user is already signed in AND the role is resolved as
-  // 'customer', send them straight to /dashboard. The role guard in
-  // App.tsx will redirect non-customers to their own portal.
+  // 'customer', send them straight to /dashboard (or honour `?next=` if
+  // the route guard sent them here from a protected page like /request).
   useEffect(() => {
-    if (user && role === 'customer') navigate('/dashboard', { replace: true });
+    if (user && role === 'customer') {
+      const sp = new URLSearchParams(window.location.search);
+      const next = sp.get('next');
+      const dest = next && next.startsWith('/') && !next.startsWith('//') ? next : '/dashboard';
+      navigate(dest, { replace: true });
+    }
   }, [user, role, navigate]);
 
   if (user && role === 'customer') return null;

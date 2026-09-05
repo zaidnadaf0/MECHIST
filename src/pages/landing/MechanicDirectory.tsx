@@ -246,23 +246,23 @@ function MechanicCard({ m, distanceKm: dist }: { m: PublicMechanic; distanceKm: 
         <div className="space-y-0.5">
           {dist != null ? (
             <div className="flex items-center gap-1 text-fg-subtle">
-              <MapPin size={12} className="text-aqua-400" />
+              <MapPin size={14} strokeWidth={2} className="text-aqua-400" />
               <span>{dist.toFixed(1)} km from you</span>
             </div>
           ) : m.garageAddress ? (
             <div className="flex items-center gap-1 text-fg-subtle">
-              <MapPin size={12} className="text-fg-subtle" />
+              <MapPin size={14} strokeWidth={2} className="text-fg-subtle" />
               <span className="truncate max-w-[10rem]">{m.garageAddress}</span>
             </div>
           ) : (
             <div className="flex items-center gap-1 text-fg-subtle">
-              <Wrench size={12} className="text-fg-subtle" />
+              <Wrench size={14} strokeWidth={2} className="text-fg-subtle" />
               <span>Mobile rig</span>
             </div>
           )}
           {typeof m.experienceYears === 'number' && (
             <div className="flex items-center gap-1 text-fg-muted">
-              <Star size={12} className="text-gold-400" />
+              <Star size={14} strokeWidth={2} className="text-gold-400" />
               <span>{m.experienceYears}+ yrs experience</span>
             </div>
           )}

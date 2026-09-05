@@ -34,10 +34,14 @@ export function MechanicLogin() {
   const [wrongPortal, setWrongPortal] = useState<'customer' | 'admin' | null>(null);
 
   // If the user is already signed in AND the role is resolved as
-  // 'mechanic', send them straight to /mechanic. The role guard in
-  // App.tsx will redirect non-mechanics to their own portal.
+  // 'mechanic', send them straight to /mechanic (or honour `?next=`).
   useEffect(() => {
-    if (user && role === 'mechanic') navigate('/mechanic', { replace: true });
+    if (user && role === 'mechanic') {
+      const sp = new URLSearchParams(window.location.search);
+      const next = sp.get('next');
+      const dest = next && next.startsWith('/') && !next.startsWith('//') ? next : '/mechanic';
+      navigate(dest, { replace: true });
+    }
   }, [user, role, navigate]);
 
   if (user && role === 'mechanic') return null;

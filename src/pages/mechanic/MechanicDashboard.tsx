@@ -453,8 +453,8 @@ function OfferCard({
             <div className="mt-2 text-body font-medium text-fg-app">{job.problemCategory ?? 'Service request'}</div>
             <p className="mt-0.5 max-w-xl text-small text-fg-muted line-clamp-2">{job.problemText}</p>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-fg-subtle">
-              <span className="inline-flex items-center gap-1"><MapPin size={12} aria-hidden />{job.customerLat.toFixed(4)}, {job.customerLng.toFixed(4)}</span>
-              <span className="inline-flex items-center gap-1"><Clock size={12} aria-hidden />{new Date(job.createdAt).toLocaleTimeString()}</span>
+              <span className="inline-flex items-center gap-1"><MapPin size={14} strokeWidth={2} aria-hidden />{job.customerLat.toFixed(4)}, {job.customerLng.toFixed(4)}</span>
+              <span className="inline-flex items-center gap-1"><Clock size={14} strokeWidth={2} aria-hidden />{new Date(job.createdAt).toLocaleTimeString()}</span>
             </div>
           </div>
 
@@ -548,7 +548,7 @@ function Ready({ ok, label }: { ok: boolean; label: string }) {
           (ok ? 'bg-success-500/15 text-success-600 dark:text-success-400' : 'bg-hair/[0.08] text-fg-subtle')
         }
       >
-        {ok ? <Check size={11} /> : <X size={11} />}
+        {ok ? <Check size={14} strokeWidth={2} /> : <X size={14} strokeWidth={2} />}
       </span>
       <span className={ok ? 'text-fg-app' : 'text-fg-muted'}>{label}</span>
       <span className="sr-only">{ok ? '(complete)' : '(missing)'}</span>
