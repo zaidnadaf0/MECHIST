@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * scripts/check-rules.mjs
  *
@@ -13,7 +13,7 @@
  *
  * This script is the substitute: a small set of targeted checks against the
  * rules text that catch the specific Phase 9 invariants we care about. It is
- * NOT a full grammar parse — it only looks for the lines/blocks we want to
+ * NOT a full grammar parse â€” it only looks for the lines/blocks we want to
  * be present.
  *
  * Exit codes: 0 if all checks pass, 1 if any fail. Failing checks print
@@ -41,6 +41,9 @@
  *  R011  mechanics/{uid} create forces approved == false
  *  R012  mechanics/{uid} self-update forbids rating/reviewCount mutation
  *  R013  catch-all {document=**} denies everything
+ *  R014  requests/{id} create validates problemText >=5 and finite customerLat/Lng
+ *  R015  storage.rules owner-only + image MIME + 8MB guard + firebase.json wiring
+ *  R016  notifications/{uid}/items/{id} owner-scoped inbox (Batch 2 row 6)
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -62,7 +65,7 @@ if (!existsSync(filePath)) {
 const src = readFileSync(filePath, 'utf8');
 
 function matchBlock(pathPattern) {
-  // The block header in this repo is `match /<pattern> {` — note there is
+  // The block header in this repo is `match /<pattern> {` â€” note there is
   // NO closing slash between the path and the block-opening brace, even
   // for the top-level `match /databases/{database}/documents {`. We use a
   // regex anchored on the path itself plus the literal trailing ` {`.
@@ -271,6 +274,61 @@ function record(id, label, pass, detail) {
     pass ? null : 'catch-all deny missing');
 }
 
+// R014
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow create:') : -1;
+  const end = block ? block.indexOf('allow update:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const hasText = /request\.resource\.data\.problemText\s+is\s+string/.test(body) && /problemText.*size\(\)\s*>=\s*5/.test(body);
+  const hasLatLng = /request\.resource\.data\.customerLat\s+is\s+number/.test(body) && /request\.resource\.data\.customerLng\s+is\s+number/.test(body);
+  record('R014', "requests/{id} create validates problemText >=5 and finite customerLat/Lng",
+    hasText && hasLatLng,
+    `problemText=${hasText} customerLatLng=${hasLatLng}`);
+}
+
+// R015
+{
+  const hasStorageKey = (() => {
+    try {
+      // firebase.json may have been written with a BOM on Windows — strip it before parse
+      const raw = readFileSync(join(__dirname, '..', 'firebase.json'), 'utf8').replace(/^﻿/, '');
+      const fj = JSON.parse(raw);
+      return Boolean(fj.storage && fj.storage.rules);
+    } catch { return false; }
+  })();
+  let storageOk = false;
+  let storageDetail = '';
+  try {
+    const sr2 = readFileSync(join(__dirname, '..', 'storage.rules'), 'utf8');
+    const hasOwner = /isOwner\(uid\)/.test(sr2) && /request\.auth\.uid\s*==\s*uid/.test(sr2);
+    const hasImage = /isSafeImage\(\)/.test(sr2) && /image\/\.\*/.test(sr2) && /8\s*\*\s*1024\s*\*\s*1024/.test(sr2);
+    const hasCatchAll = /match\s+\/\{allPaths=\*\*\}[\s\S]*?allow\s+read,\s*write:\s*if\s*false/.test(sr2);
+    storageOk = hasOwner && hasImage && hasCatchAll;
+    storageDetail = `owner=${hasOwner} image=${hasImage} catchAll=${hasCatchAll}`;
+  } catch (e) {
+    storageDetail = `storage.rules not found: ${e.message ?? String(e)}`;
+  }
+  record('R015', 'storage.rules exists with owner-only + image MIME + 8MB guard and catch-all deny',
+    hasStorageKey && storageOk,
+    hasStorageKey ? (storageOk ? null : storageDetail) : 'no storage key in firebase.json');
+}
+
+// R016 — notifications/{uid}/items/{id} owner-only inbox (Batch 2 row 6)
+{
+  const block = matchBlock('notifications/{uid}/items/{id}');
+  if (!block) {
+    record('R016', 'notifications/{uid}/items/{id} owner-scoped inbox exists with read/create/update/delete',
+      false, 'match /notifications/{uid}/items/{id} block missing');
+  } else {
+    const hasRead = /allow\s+read:\s*if[\s\S]*request\.auth\.uid\s*==\s*uid/.test(block);
+    const hasCreate = /allow\s+create:\s*if[\s\S]*title\s+is\s+string/.test(block) && /title\.size\(\)/.test(block) && /createdAt\s+is\s+number/.test(block);
+    const hasUpdate = /allow\s+update:\s*if[\s\S]*hasOnly\(\[.*read/.test(block);
+    record('R016', 'notifications/{uid}/items/{id} owner-scoped inbox exists with read/create/update/delete',
+      hasRead && hasCreate && hasUpdate,
+      `read=${hasRead} create(bounded title+createdAt)=${hasCreate} update(read-only)=${hasUpdate}`);
+  }
+}
 let failed = 0;
 for (const r of results) {
   const tag = r.pass ? 'OK  ' : 'FAIL';

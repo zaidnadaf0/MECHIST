@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Badge } from '@/components/ui';
-import { EmptyState, Skeleton } from '@/components/feedback';
+import { EmptyState, ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import { listCompletedJobs } from '@/lib/mechanic';
@@ -11,18 +11,19 @@ export function MechanicHistory() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [items, setItems] = useState<ServiceRequest[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
     let cancelled = false;
-    listCompletedJobs(user.uid, 30).then((h) => { if (!cancelled) setItems(h); });
+    listCompletedJobs(user.uid, 30).then((r) => { if (!cancelled) { if (r.error) { console.warn('[MechanicHistory] listCompletedJobs failed:', r.error); setError(r.error.message ?? String(r.error)); } else { setError(null); } setItems(r.data ?? []); } });
     return () => { cancelled = true; };
   }, [user, navigate]);
 
   if (!user) return null;
 
   return (
-    <main className="container section-sm">
+    <main className="container section-compact">
       <FadeIn>
         <div className="text-xs uppercase tracking-wider text-fg-muted">Job history</div>
         <h1 className="mt-2 display text-display-md text-fg-app">Completed jobs</h1>
@@ -31,8 +32,10 @@ export function MechanicHistory() {
       <div className="mt-8">
         {items === null ? (
           <div className="grid gap-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
+        ) : error ? (
+          <ErrorState kind="api" title="Could not load history" description={error} retryLabel="Retry" onRetry={() => location.reload()} />
         ) : items.length === 0 ? (
-          <EmptyState kind="history" title="No completed jobs yet" description="Once you finish a service, it will appear here." />
+          <EmptyState compact kind="history" title="No completed jobs yet" description="Once you finish a service, it will appear here." />
         ) : (
           <div className="grid gap-3">
             {items.map((r) => (

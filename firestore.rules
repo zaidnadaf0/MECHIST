@@ -1,4 +1,4 @@
-rules_version = '2';
+﻿rules_version = '2';
 // Firestore security rules for MECHIST.
 //
 // Trust model:
@@ -111,7 +111,15 @@ service cloud.firestore {
       allow create: if isSignedIn() && isCustomer()
         && request.resource.data.customerId == request.auth.uid
         && request.resource.data.status == 'requested'
-        && request.resource.data.offerExpiresAt is number;
+        && request.resource.data.offerExpiresAt is number
+        && request.resource.data.problemText is string
+        && request.resource.data.problemText.size() >= 5
+        && request.resource.data.customerLat is number
+        && request.resource.data.customerLng is number
+        && request.resource.data.customerLat >= -90
+        && request.resource.data.customerLat <= 90
+        && request.resource.data.customerLng >= -180
+        && request.resource.data.customerLng <= 180;
 
       // The customer can cancel/rate their own request. The mechanic can
       // accept a queued job (records mechanicId/mechanicName/etaMin) and
@@ -146,7 +154,8 @@ service cloud.firestore {
              ['accepted', 'on-the-way', 'arrived', 'service', 'completed', 'cancelled']
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'mechanicLat', 'mechanicLng', 'etaMin',
-                        'rating', 'comment', 'ratedAt', 'updatedAt'])) ||
+                        'rating', 'comment', 'ratedAt', 'updatedAt',
+                        'amountCents', 'durationMin'])) ||
         // Mechanic declines an open offer (status == 'requested', no mechanic assigned).
         // Appends their UID to declinedBy[] and updates updatedAt.
         (resource.data.status == 'requested'
@@ -216,7 +225,7 @@ service cloud.firestore {
       allow read: if true;
 
       // Self-create on signup. Must be one of the un-approved
-      // verification states — clients cannot mark themselves approved.
+      // verification states â€” clients cannot mark themselves approved.
       allow create: if isSelf(uid)
         && isSignedIn()
         && request.resource.data.uid == request.auth.uid
@@ -241,6 +250,25 @@ service cloud.firestore {
       );
 
       allow delete: if isClaimAdmin();
+    }
+
+    // ---- notifications/{uid}/items/{id} --------------------------
+    // Owner-scoped inbox: watchNotifications/listNotificationsDetailed
+    // (src/lib/notifications.ts) cap/limit 20 default/50 hard cap.
+    // Schema: AppNotification {id,type,title(1-120),body?,requestId?,createdAt,read?}
+    // Verbatim instruction: Batch 2 Notification inbox notifications/{uid}/items/{id} owner-only rules
+    match /notifications/{uid}/items/{id} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow create: if isSignedIn()
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120
+        && request.resource.data.type is string
+        && request.resource.data.createdAt is number;
+      allow update: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+      allow delete: if isSignedIn() && request.auth.uid == uid;
     }
 
     // ---- catch-all --------------------------------------------------

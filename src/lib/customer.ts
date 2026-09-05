@@ -4,10 +4,11 @@
  * throwing. Pages handle the empty/loading/error states themselves.
  */
 import {
-  collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where,
+  collection, deleteDoc, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch,
   type DocumentData, type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '@/app/firebase';
+import { isValidLatLng } from './geoapify';
 
 export interface Vehicle {
   id: string;
@@ -16,6 +17,7 @@ export interface Vehicle {
   year: number;
   plate: string;
   type: 'car' | 'bike' | 'van' | 'truck';
+  isDefault?: boolean;
 }
 
 export interface ServiceRequest {
@@ -46,6 +48,10 @@ export interface ServiceRequest {
   rating?: number;
   /** Optional comment accompanying the rating. */
   comment?: string;
+  /** Final amount in minor units (e.g. paise) when the job is completed; optional — older docs will not have it. */
+  amountCents?: number;
+  /** Service duration in minutes when known; optional — older docs will not have it. */
+  durationMin?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -68,14 +74,20 @@ function asRequest(id: string, raw: DocumentData | undefined): ServiceRequest | 
   return { id, ...(raw as Omit<ServiceRequest, 'id'>) };
 }
 
-export async function listVehicles(customerId: string): Promise<Vehicle[]> {
+export type VehiclesResult = { data: Vehicle[] | null; error: Error | null };
+export async function listVehiclesDetailed(customerId: string): Promise<VehiclesResult> {
   try {
     const d = requireDb();
     const snap = await getDocs(query(collection(d, 'vehicles'), where('ownerId', '==', customerId), orderBy('createdAt', 'desc')));
-    return snap.docs.map((s) => asVehicle(s.id, s.data())).filter((v): v is Vehicle => Boolean(v));
-  } catch {
-    return [];
+    return { data: snap.docs.map((s) => asVehicle(s.id, s.data())).filter((v): v is Vehicle => Boolean(v)), error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error(String(e)) };
   }
+}
+
+export async function listVehicles(customerId: string): Promise<Vehicle[]> {
+  const r = await listVehiclesDetailed(customerId);
+  return r.data ?? [];
 }
 
 export async function addVehicle(customerId: string, v: Omit<Vehicle, 'id'>): Promise<Vehicle | null> {
@@ -90,8 +102,76 @@ export async function addVehicle(customerId: string, v: Omit<Vehicle, 'id'>): Pr
   }
 }
 
+export function getVehicleSync(items: Vehicle[], id: string): Vehicle | null {
+  return items.find((v) => v.id === id) ?? null;
+}
+
+export async function updateVehicle(vehicleId: string, patch: Partial<Omit<Vehicle, 'id'>>): Promise<boolean> {
+  try {
+    const d = requireDb();
+    // Strip fields that must not be written directly.
+    const { isDefault: _isDefault, ...rest } = patch as Record<string, unknown> & { isDefault?: unknown };
+    // isDefault is managed via setDefaultVehicle to keep exactly one default.
+    void _isDefault;
+    const clean: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(rest)) {
+      if (v !== undefined) clean[k] = v;
+    }
+    if (Object.keys(clean).length === 0) return false;
+    // Do not allow ownerId overwrite via patch.
+    delete (clean as Record<string, unknown>).ownerId;
+    await updateDoc(doc(d, 'vehicles', vehicleId), clean);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteVehicle(vehicleId: string): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await deleteDoc(doc(d, 'vehicles', vehicleId));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function setDefaultVehicle(customerId: string, vehicleId: string): Promise<boolean> {
+  try {
+    const d = requireDb();
+    const snap = await getDocs(query(collection(d, 'vehicles'), where('ownerId', '==', customerId)));
+    if (snap.empty) return false;
+    const targetExists = snap.docs.some((s) => s.id === vehicleId);
+    if (!targetExists) return false;
+    const batch = writeBatch(d);
+    for (const s of snap.docs) {
+      batch.update(s.ref, { isDefault: s.id === vehicleId });
+    }
+    await batch.commit();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Server-authoritative window in which a mechanic may accept a queued request. */
 export const OFFER_WINDOW_MS = 120_000;
+
+// ---- createRequest validation + deduplication (Batch 1 rows 1 & 5) ----
+
+const lastCreateAtByCustomer = new Map<string, number>();
+export const CREATE_DEDUP_WINDOW_MS = 2000;
+
+export function createRequestValidate(r: Omit<ServiceRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>): string | null {
+  if (!r.customerId || typeof r.customerId !== 'string' || !r.customerId.trim()) return 'Customer is required.';
+  if (!r.vehicleId || typeof r.vehicleId !== 'string' || !r.vehicleId.trim()) return 'Vehicle is required.';
+  const text = typeof r.problemText === 'string' ? r.problemText.trim() : '';
+  if (text.length < 5) return 'Describe the problem (at least 5 characters).';
+  if (!Number.isFinite(r.customerLat) || !Number.isFinite(r.customerLng)) return 'Location is required.';
+  if (!isValidLatLng({ lat: r.customerLat, lng: r.customerLng })) return 'Location is out of range.';
+  return null;
+}
 
 /**
  * Tri-state outcome of a customer-initiated cancel attempt.
@@ -152,6 +232,12 @@ export async function cancelRequest(
 }
 
 export async function createRequest(r: Omit<ServiceRequest, 'id' | 'createdAt' | 'updatedAt' | 'status'>): Promise<ServiceRequest | null> {
+  const validationError = createRequestValidate(r);
+  if (validationError) return null;
+  const nowForDedup = Date.now();
+  const lastAt = lastCreateAtByCustomer.get(r.customerId) ?? 0;
+  if (nowForDedup - lastAt < CREATE_DEDUP_WINDOW_MS) return null;
+  lastCreateAtByCustomer.set(r.customerId, nowForDedup);
   try {
     const d = requireDb();
     const id = `req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -167,6 +253,7 @@ export async function createRequest(r: Omit<ServiceRequest, 'id' | 'createdAt' |
     await setDoc(doc(d, 'requests', id), next);
     return next;
   } catch {
+    lastCreateAtByCustomer.delete(r.customerId);
     return null;
   }
 }
@@ -213,7 +300,8 @@ export function watchRequest(
   }
 }
 
-export async function listHistory(customerId: string, max = 20): Promise<ServiceRequest[]> {
+export type HistoryResult = { data: ServiceRequest[] | null; error: Error | null };
+export async function listHistoryDetailed(customerId: string, max = 20): Promise<HistoryResult> {
   try {
     const d = requireDb();
     const snap = await getDocs(
@@ -223,10 +311,15 @@ export async function listHistory(customerId: string, max = 20): Promise<Service
         limit(max),
       ),
     );
-    return snap.docs.map((s) => asRequest(s.id, s.data())).filter((r): r is ServiceRequest => Boolean(r));
-  } catch {
-    return [];
+    return { data: snap.docs.map((s) => asRequest(s.id, s.data())).filter((r): r is ServiceRequest => Boolean(r)), error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e : new Error(String(e)) };
   }
+}
+
+export async function listHistory(customerId: string, max = 20): Promise<ServiceRequest[]> {
+  const r = await listHistoryDetailed(customerId, max);
+  return r.data ?? [];
 }
 
 export async function rateRequest(id: string, rating: number, comment?: string): Promise<boolean> {

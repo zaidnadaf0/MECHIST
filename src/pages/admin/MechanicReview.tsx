@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Badge, Button, useToast } from '@/components/ui';
-import { EmptyState, Skeleton } from '@/components/feedback';
+import { EmptyState, ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import { type MechanicProfile } from '@/lib/mechanic';
@@ -12,10 +12,11 @@ export function MechanicReview() {
   const navigate = useNavigate();
   const toast = useToast();
   const [items, setItems] = useState<MechanicProfile[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
-    const unsub = watchAllMechanics(100, (m) => setItems(m));
+    const unsub = watchAllMechanics(100, (m) => { setItems(m); setErr(null); }, (e) => setErr(e.message));
     return () => { if (unsub) unsub(); };
   }, [user, navigate]);
 
@@ -44,17 +45,19 @@ export function MechanicReview() {
   };
 
   return (
-    <main className="container section-sm">
+    <main className="container section-compact">
       <FadeIn>
         <div className="text-xs uppercase tracking-wider text-fg-muted">Mechanic review</div>
         <h1 className="mt-2 display text-display-md text-fg-app">Network</h1>
       </FadeIn>
 
       <div className="mt-8">
-        {items === null ? (
+        {err ? (
+          <ErrorState kind="api" title="Could not load mechanics" description={err} onRetry={() => location.reload()} />
+        ) : items === null ? (
           <div className="grid gap-3">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24" />)}</div>
         ) : items.length === 0 ? (
-          <EmptyState kind="mechanics" title="No mechanics yet" description="Mechanic applications will appear here." />
+          <EmptyState kind="mechanics" compact title="No mechanics yet" description="Mechanic applications will appear here." />
         ) : (
           <div className="grid gap-3">
             {items.map((m) => (

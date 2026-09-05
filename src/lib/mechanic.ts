@@ -77,6 +77,7 @@ export interface MechanicProfile {
  */
 export function watchIncoming(
   cb: (jobs: ServiceRequest[]) => void,
+  onError?: (err: Error) => void,
   excludeUid?: string,
 ): Unsubscribe | null {
   try {
@@ -90,7 +91,7 @@ export function watchIncoming(
           .filter((j) => !excludeUid || !(j.declinedBy ?? []).includes(excludeUid));
         cb(jobs);
       },
-      () => cb([]),
+      (err) => { cb([]); onError?.(err as Error); },
     );
   } catch {
     return null;
@@ -167,10 +168,25 @@ export async function acceptJob(
   }
 }
 
-export async function updateJobStatus(id: string, status: JobStatus): Promise<boolean> {
+/**
+ * Caller: MechanicJob status actions, Tracking. Affected API: requests/{id} status advance.
+ * Schema: ServiceRequest { amountCents?: number (minor units, >=0), durationMin?: number (>=0) }
+ * Verbatim instruction: Batch 2 History enrichment add optional amountCents and durationMin only if
+ * justified preserve compatibility fallback safely do not fabricate.
+ */
+export async function updateJobStatus(
+  id: string,
+  status: JobStatus,
+  extra?: { amountCents?: number; durationMin?: number },
+): Promise<boolean> {
   try {
     const d = requireDb();
-    await updateDoc(doc(d, 'requests', id), { status, updatedAt: serverTimestamp() });
+    const patch: Record<string, unknown> = { status, updatedAt: serverTimestamp() };
+    if (status === 'completed') {
+      if (extra?.amountCents != null && Number.isFinite(extra.amountCents) && extra.amountCents >= 0) patch.amountCents = Math.round(extra.amountCents);
+      if (extra?.durationMin != null && Number.isFinite(extra.durationMin) && extra.durationMin >= 0) patch.durationMin = Math.round(extra.durationMin);
+    }
+    await updateDoc(doc(d, 'requests', id), patch);
     return true;
   } catch { return false; }
 }
@@ -308,7 +324,11 @@ export async function pushMechanicLocationToRequest(requestId: string, lat: numb
   } catch { return false; }
 }
 
-export async function listCompletedJobs(mechanicId: string, max = 30): Promise<ServiceRequest[]> {
+export type ListCompletedResult =
+  | { data: ServiceRequest[]; error: null }
+  | { data: null; error: Error };
+
+export async function listCompletedJobs(mechanicId: string, max = 30): Promise<ListCompletedResult> {
   try {
     const d = requireDb();
     const snap = await getDocs(
@@ -319,11 +339,15 @@ export async function listCompletedJobs(mechanicId: string, max = 30): Promise<S
         limit(max),
       ),
     );
-    return snap.docs.map((s) => asRequest(s.id, s.data())).filter((r): r is ServiceRequest => Boolean(r));
-  } catch { return []; }
+    return { data: snap.docs.map((s) => asRequest(s.id, s.data())).filter((r): r is ServiceRequest => Boolean(r)), error: null };
+  } catch (e) { return { data: null, error: e instanceof Error ? e : new Error(String(e)) }; }
 }
 
-export async function listActiveJob(mechanicId: string): Promise<ServiceRequest | null> {
+export type ListActiveResult =
+  | { data: ServiceRequest | null; error: null }
+  | { data: null; error: Error };
+
+export async function listActiveJob(mechanicId: string): Promise<ListActiveResult> {
   try {
     const d = requireDb();
     const snap = await getDocs(
@@ -333,8 +357,8 @@ export async function listActiveJob(mechanicId: string): Promise<ServiceRequest 
         limit(1),
       ),
     );
-    if (snap.empty) return null;
+    if (snap.empty) return { data: null, error: null };
     const doc0 = snap.docs[0];
-    return asRequest(doc0.id, doc0.data());
-  } catch { return null; }
+    return { data: asRequest(doc0.id, doc0.data()), error: null };
+  } catch (e) { return { data: null, error: e instanceof Error ? e : new Error(String(e)) }; }
 }

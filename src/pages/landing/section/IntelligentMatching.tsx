@@ -1,3 +1,4 @@
+// Row 10 — 25 km display radius (DISPATCH_RADIUS_KM) vs 50 km server fallback — unified in src/lib/nearby.ts.
 /**
  * MECHIST — Intelligent Matching.
  *

@@ -193,6 +193,7 @@ export function AuthPage() {
 
 function RoleTile({ role }: { role: RoleCard }) {
   const Icon = role.icon;
+  const navigate = useNavigate();
   return (
     <Card
       tone={role.edge}
@@ -217,7 +218,7 @@ function RoleTile({ role }: { role: RoleCard }) {
           size="md"
           fullWidth
           rightIcon={<ArrowRight className="h-4 w-4" />}
-          onClick={() => { window.location.assign(role.ctaHref); }}
+          onClick={() => navigate(role.ctaHref)}
         >
           {role.cta}
         </Button>

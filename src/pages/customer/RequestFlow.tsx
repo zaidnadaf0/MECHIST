@@ -28,7 +28,7 @@ import { ProviderMap } from '@/components/map/ProviderMap';
 import { listVehicles, createRequest, type Vehicle } from '@/lib/customer';
 import { listAllPublicMechanics } from '@/lib/public';
 import type { MechanicProfile } from '@/lib/mechanic';
-import { nearbyMechanics, type NearbyMechanic } from '@/lib/nearby';
+import { nearbyMechanics, DISPATCH_RADIUS_KM, type NearbyMechanic } from '@/lib/nearby';
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -94,7 +94,7 @@ export function RequestFlow() {
       { lat: geo.coords.lat, lng: geo.coords.lng },
       problemCategory,
       mechanics,
-      { radiusKm: 25 },
+      { radiusKm: DISPATCH_RADIUS_KM },
     );
   }, [geo.coords, problemCategory, mechanics]);
 
@@ -141,7 +141,7 @@ export function RequestFlow() {
 
   return (
     <SectionShell tone="app">
-      <div className="container section-sm flex flex-col gap-8">
+      <div className="container section-compact flex flex-col gap-8">
 
         {/* ---------- Header ---------- */}
         <FadeIn>
@@ -232,15 +232,25 @@ export function RequestFlow() {
               Back
             </Button>
             {step < 5 ? (
-              <Button
-                variant="primary"
-                size="md"
-                rightIcon={<ArrowRight className="h-4 w-4" />}
-                onClick={goNext}
-                disabled={!canNext()}
-              >
-                Continue
-              </Button>
+              <div className="flex flex-col items-end gap-1">
+                <Button
+                  variant="primary"
+                  size="md"
+                  rightIcon={<ArrowRight className="h-4 w-4" />}
+                  onClick={goNext}
+                  disabled={!canNext()}
+                  aria-describedby={!canNext() ? "step-hint" : undefined}
+                >
+                  Continue
+                </Button>
+                {!canNext() && (
+                  <span id="step-hint" className="text-xs text-fg-subtle">
+                    {step === 1 && "Pick a vehicle to continue."}
+                    {step === 2 && "Describe the problem (at least 5 characters)."}
+                    {step === 3 && "Share your location to continue."}
+                  </span>
+                )}
+              </div>
             ) : null}
           </div>
         </FadeIn>
@@ -268,7 +278,7 @@ function StepVehicle({
     );
   }
   if (vehicles.length === 0) {
-    return <EmptyState kind="vehicles" onAction={onManage} />;
+    return <EmptyState compact kind="vehicles" onAction={onManage} />;
   }
   return (
     <ul className="grid gap-2" aria-label="Your vehicles">
@@ -429,6 +439,7 @@ function StepMechanic({
     return (
       <div className="flex flex-col gap-4">
         <EmptyState
+          compact
           kind="mechanics"
           title="No mechanics in range right now"
           description="Your request will still go to the dispatch queue. We will notify you as soon as a verified mechanic becomes available."
@@ -436,7 +447,7 @@ function StepMechanic({
           onAction={onSkip}
         />
         <p className="text-xs text-fg-subtle text-center">
-          No matching mechanics were found within 25 km. You can still submit — the request is queued.
+          No matching mechanics were found within ~25 km (display radius). You can still submit — the request is queued.
         </p>
       </div>
     );

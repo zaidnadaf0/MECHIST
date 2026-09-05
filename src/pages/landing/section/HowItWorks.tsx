@@ -1,3 +1,4 @@
+// Row 10 — display radius ~25 km (DISPATCH_RADIUS_KM) vs server 50 km fallback — documented in src/lib/nearby.ts.
 /**
  * MECHIST — How It Works.
  *
@@ -74,6 +75,7 @@ const STEPS: Step[] = [
   },
 ];
 
+// Row 10 — '25 km' copy reflects DISPATCH_RADIUS_KM in src/lib/nearby.ts (display radius). Server fallback 50 km lives in functions/src/matching.ts.
 export function HowItWorks() {
   const [active, setActive] = useState(0);
   const current = STEPS[active];

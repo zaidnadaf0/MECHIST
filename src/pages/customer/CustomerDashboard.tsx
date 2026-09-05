@@ -145,7 +145,7 @@ export function CustomerDashboard() {
 
   return (
     <SectionShell tone="app">
-      <div className="container section-sm flex flex-col gap-10">
+      <div className="container section-compact flex flex-col gap-10">
 
         {/* ---------- Hero ---------- */}
         <FadeIn>
@@ -262,7 +262,7 @@ export function CustomerDashboard() {
                 </div>
               </Card>
             ) : (
-              <EmptyState
+              <EmptyState compact
                 kind="requests"
                 onAction={() => navigate('/request')}
               />
@@ -290,7 +290,7 @@ export function CustomerDashboard() {
                 : vehicles.length === 0
                   ? (
                     <div className="sm:col-span-2 lg:col-span-3">
-                      <EmptyState kind="vehicles" onAction={() => navigate('/vehicles')} />
+                      <EmptyState compact kind="vehicles" onAction={() => navigate('/vehicles')} />
                     </div>
                   )
                   : vehicles.map((v) => (
@@ -312,7 +312,7 @@ export function CustomerDashboard() {
               {vehicles && vehicles.length > 0 && vehicles.length < 3 && (
                 <Card
                   interactive
-                  className="border-dashed"
+                  className="border-dashed py-3"
                   onClick={() => navigate('/vehicles')}
                 >
                   <div className="flex items-center gap-3 text-fg-muted">
@@ -381,7 +381,7 @@ export function CustomerDashboard() {
             {history === null ? (
               <Skeleton className="h-24" />
             ) : recent.length === 0 ? (
-              <EmptyState kind="history" />
+              <EmptyState compact kind="history" />
             ) : (
               <div className="grid gap-3">
                 {recent.map((r) => (

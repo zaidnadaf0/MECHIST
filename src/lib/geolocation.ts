@@ -23,9 +23,8 @@ const REQUEST_OPTS: PositionOptions = {
 };
 
 /**
- * One-shot geolocation request. We intentionally don't watch position here
- * because continuous listeners need careful cleanup. Pages that need
- * continuous updates should call useWatchPosition() instead.
+ * One-shot geolocation request. No auto-request — caller must invoke `request()`.
+ * Continuous listeners should use useWatchPosition() with explicit opt-in.
  */
 export function useGeolocation(): [GeoState, () => void] {
   const [state, setState] = useState<GeoState>({ status: 'idle', coords: null, error: null });
@@ -43,7 +42,7 @@ export function useGeolocation(): [GeoState, () => void] {
         error: null,
       }),
       (err) => setState({
-        status: err.code === err.PERMISSION_DENIED ? 'denied' : 'error',
+        status: err.code === err.PERMISSION_DENIED ? 'denied' : err.code === err.TIMEOUT ? 'error' : 'error',
         coords: null,
         error: err.message,
       }),
@@ -60,25 +59,25 @@ export interface WatchOptions {
   minDistanceM?: number;
   /** Re-emit at most once every `minIntervalMs` milliseconds. */
   minIntervalMs?: number;
+  /** When false, the watcher is not started. Defaults to true for backward compat. */
+  enabled?: boolean;
 }
 
 /**
- * Continuous geolocation subscription.
- *
- * The browser may emit fixes faster than we'd ever want to write to
- * Firestore, so we throttle the public emission:
- *   - drop updates that haven't moved `minDistanceM` (default 25 m), and
- *   - drop updates that arrived within `minIntervalMs` (default 5000 ms)
- *     of the last accepted fix.
- *
- * The browser's own watchPosition is still running underneath — we just
- * choose which fixes to surface. Cleanup calls `clearWatch` on unmount.
+ * Continuous geolocation subscription. Only starts when `enabled !== false`.
+ * This keeps privacy: no background tracking unless the user explicitly
+ * enables "Track My Location". Cleanup calls clearWatch on unmount or
+ * when enabled flips to false.
  */
 export function useWatchPosition(options: WatchOptions = {}): [GeoState, () => void] {
-  const { minDistanceM = 25, minIntervalMs = 5000 } = options;
+  const { minDistanceM = 25, minIntervalMs = 5000, enabled = true } = options;
   const [state, setState] = useState<GeoState>({ status: 'idle', coords: null, error: null });
 
   useEffect(() => {
+    if (!enabled) {
+      setState((s) => (s.status === 'requesting' ? { ...s, status: 'idle' } : s));
+      return;
+    }
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setState({ status: 'unavailable', coords: null, error: 'Geolocation is not available in this browser.' });
       return;
@@ -122,7 +121,7 @@ export function useWatchPosition(options: WatchOptions = {}): [GeoState, () => v
     return () => {
       if (watchId != null) navigator.geolocation.clearWatch(watchId);
     };
-  }, [minDistanceM, minIntervalMs]);
+  }, [minDistanceM, minIntervalMs, enabled]);
 
   const request = () => setState((s) => ({ ...s, status: 'requesting', error: null }));
   return [state, request];

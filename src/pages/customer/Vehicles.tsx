@@ -49,7 +49,7 @@ export function Vehicles() {
   };
 
   return (
-    <main className="container section-sm">
+    <main className="container section-compact">
       <FadeIn>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
@@ -97,7 +97,7 @@ export function Vehicles() {
             {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
           </div>
         ) : items.length === 0 ? (
-          <EmptyState kind="vehicles" onAction={() => setAdding(true)} />
+          <EmptyState compact kind="vehicles" onAction={() => setAdding(true)} />
         ) : (
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
             {items.map((v) => (

@@ -1,6 +1,6 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, type Auth } from 'firebase/auth';
-import { getFirestore, type Firestore } from 'firebase/firestore';
+import { enableIndexedDbPersistence, getFirestore, type Firestore } from 'firebase/firestore';
 import { getStorage, type FirebaseStorage } from 'firebase/storage';
 
 const env = import.meta.env;
@@ -40,6 +40,9 @@ export function db(): Firestore | null {
   if (!firebaseApp()) return null;
   if (_db) return _db;
   _db = getFirestore(_app!);
+  try {
+    void enableIndexedDbPersistence(_db).catch(() => {});
+  } catch { /* ignore sync throw */ }
   return _db;
 }
 export function storage(): FirebaseStorage | null {

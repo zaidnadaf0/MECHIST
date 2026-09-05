@@ -51,7 +51,7 @@ const roleHue = {
 const publicLinks: NavItem[] = [
   { to: '/', label: 'Overview', icon: <Activity size={12} aria-hidden /> },
   { to: '/how-it-works', label: 'How it works', icon: <Radar size={12} aria-hidden /> },
-  { to: '/map', label: 'Map', icon: <MapPin size={12} aria-hidden /> },
+  { to: '/map', label: 'Find Mechanics', icon: <MapPin size={12} aria-hidden /> },
   { to: '/mechanics', label: 'Network', icon: <Users2 size={12} aria-hidden /> },
   { to: '/#trust', label: 'Trust', icon: <ShieldCheck size={12} aria-hidden /> },
 ];
@@ -225,7 +225,13 @@ export function TopNav() {
                 >
                   <NavLink
                     to={l.to}
-                    className="flex items-center justify-between rounded-lg px-1 py-2.5 text-body text-fg-app"
+                    end={l.to === '/' || l.to === '/admin' || l.to === '/mechanic'}
+                    className={({ isActive }) =>
+                      cx(
+                        'flex items-center justify-between rounded-lg px-3 py-2.5 text-body transition-colors',
+                        isActive ? 'bg-surface-1 text-fg-app border border-line-soft' : 'text-fg-muted hover:text-fg-app hover:bg-surface-1/60',
+                      )
+                    }
                   >
                     <span className="inline-flex items-center gap-2">
                       {l.icon}
@@ -280,7 +286,7 @@ function NavItem({ to, children }: { to: string; children: ReactNode }) {
   return (
     <NavLink
       to={to}
-      end={to === '/'}
+      end={to === '/' || to === '/admin' || to === '/mechanic'}
       className={({ isActive }) =>
         cx(
           'relative px-3 py-2 text-small transition-colors duration-200',

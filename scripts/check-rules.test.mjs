@@ -53,8 +53,8 @@ describe('check-rules.mjs — Phase 9 invariants', () => {
         `linter exited ${res.status}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}`,
       );
     }
-    expect(res.stdout).toMatch(/13\/13 checks passed/);
-    for (let i = 1; i <= 13; i++) {
+    expect(res.stdout).toMatch(/16\/16 checks passed/);
+    for (let i = 1; i <= 16; i++) {
       const id = `R${String(i).padStart(3, '0')}`;
       expect(res.stdout).toContain(`OK    ${id}`);
     }

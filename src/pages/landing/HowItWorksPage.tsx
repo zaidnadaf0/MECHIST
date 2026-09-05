@@ -71,7 +71,7 @@ export function HowItWorksPage() {
       </SectionShell>
 
       {/* Customer journey */}
-      <ScrollRevealSection className="container section-sm">
+      <ScrollRevealSection className="container section-compact">
         <SectionHeading
           as="h2"
           size="sm"
@@ -101,7 +101,7 @@ export function HowItWorksPage() {
       </ScrollRevealSection>
 
       {/* Mechanic journey */}
-      <ScrollRevealSection className="container section-sm">
+      <ScrollRevealSection className="container section-compact">
         <SectionHeading
           as="h2"
           size="sm"
@@ -130,7 +130,7 @@ export function HowItWorksPage() {
       </ScrollRevealSection>
 
       {/* Location & GPS + Matching */}
-      <ScrollRevealSection className="container section-sm">
+      <ScrollRevealSection className="container section-compact">
         <div className="grid gap-4 lg:grid-cols-2">
           <Card tone="aqua">
             <SectionHeading as="h2" size="sm" eyebrow="Location & GPS" title="How location works." description="Honest, no road-ETA claim." />
@@ -159,7 +159,7 @@ export function HowItWorksPage() {
       </ScrollRevealSection>
 
       {/* Tracking & completion */}
-      <ScrollRevealSection className="container section-sm">
+      <ScrollRevealSection className="container section-compact">
         <Card tone="gold">
           <div className="grid gap-6 lg:grid-cols-3">
             <div className="lg:col-span-2">
@@ -187,7 +187,7 @@ export function HowItWorksPage() {
       </ScrollRevealSection>
 
       {/* FAQ */}
-      <ScrollRevealSection className="container section-sm">
+      <ScrollRevealSection className="container section-compact">
         <SectionHeading as="h2" size="sm" eyebrow="FAQ" title="Real-behavior answers." description="Each answer maps to something the app actually does." />
         <div className="mt-6 grid gap-3 lg:grid-cols-2">
           <Card><h3 className="text-h3 text-fg-app">What happens right after I submit?</h3><p className="mt-1.5 text-small text-fg-muted text-pretty">Your request is written to Firestore with status requested and a two-minute offer window. Mechanics with matching specialty and vehicle type within ~25 km see it live. First to accept is assigned.</p></Card>

@@ -6,14 +6,29 @@ export function Skeleton({ className, ...rest }: HTMLAttributes<HTMLDivElement>)
     <div
       aria-hidden
       className={cx(
-        'rounded-md bg-ink-200/60 dark:bg-ink-700/60',
-        'bg-[length:400px_100%] bg-no-repeat',
+        'min-h-4 rounded-xl border border-line-soft bg-ink-200/70 dark:bg-ink-800/70',
+        'bg-[length:420px_100%] bg-no-repeat',
         'animate-shimmer',
-        'bg-gradient-to-r from-transparent via-white/40 dark:via-white/5 to-transparent',
+        'bg-gradient-to-r from-transparent via-white/65 dark:via-white/[0.14] to-transparent',
         className,
       )}
       {...rest}
     />
+  );
+}
+
+export function CardSkeleton({ lines = 3, className }: { lines?: number; className?: string }) {
+  return (
+    <div className={cx('rounded-xl border border-line-soft bg-surface-1 p-5 md:p-6 shadow-card', className)} aria-hidden>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 space-y-2.5">
+          <div className="h-4 w-2/3 rounded-full bg-ink-200/70 dark:bg-ink-700/60 bg-[length:420px_100%] bg-no-repeat animate-shimmer bg-gradient-to-r from-transparent via-white/65 dark:via-white/[0.14] to-transparent" />
+          <div className="h-3 w-1/2 rounded-full bg-ink-200/60 dark:bg-ink-700/50 bg-[length:420px_100%] bg-no-repeat animate-shimmer bg-gradient-to-r from-transparent via-white/65 dark:via-white/[0.14] to-transparent" />
+          {lines > 2 && <div className="h-3 w-5/6 rounded-full bg-ink-200/50 dark:bg-ink-700/40 bg-[length:420px_100%] bg-no-repeat animate-shimmer bg-gradient-to-r from-transparent via-white/65 dark:via-white/[0.14] to-transparent" />}
+        </div>
+        <div className="h-6 w-16 shrink-0 rounded-full bg-ink-200/60 dark:bg-ink-700/50" />
+      </div>
+    </div>
   );
 }
 

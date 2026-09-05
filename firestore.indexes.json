@@ -1,6 +1,16 @@
 {
   "indexes": [
     {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [

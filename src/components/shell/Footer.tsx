@@ -17,10 +17,10 @@ import { LogoMark } from '@/components/illustrations/Illustrations';
 
 export function Footer() {
   return (
-    <footer className="relative mt-section overflow-hidden border-t border-line-soft bg-surface-1">
-      <span aria-hidden className="mesh-layer opacity-40" />
+    <footer className="relative mt-10 overflow-hidden border-t border-line-soft bg-surface-1">
+      <span aria-hidden className="mesh-layer opacity-30" />
 
-      <div className="container relative grid gap-12 py-section-sm md:grid-cols-12">
+      <div className="container relative grid gap-10 py-10 md:grid-cols-12">
         <div className="md:col-span-5">
           <div className="flex items-center gap-2.5">
             <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg ring-1 ring-inset ring-line-soft">
@@ -63,7 +63,7 @@ export function Footer() {
         </div>
       </div>
 
-      <div className="container relative flex flex-col gap-3 border-t border-line-soft py-7 sm:flex-row sm:items-center sm:justify-between">
+      <div className="container relative flex flex-col gap-3 border-t border-line-soft py-6 sm:flex-row sm:items-center sm:justify-between">
         <p className="font-mono text-xs text-fg-subtle">
           © {new Date().getFullYear()} MECHIST — roadside assistance, reimagined.
         </p>

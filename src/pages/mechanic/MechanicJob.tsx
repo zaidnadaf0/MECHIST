@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Card, Badge, Button, useToast, Modal, Textarea } from '@/components/ui';
-import { ErrorState, Skeleton } from '@/components/feedback';
+import { ErrorState, ProgressBar, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import { watchRequest, type ServiceRequest } from '@/lib/customer';
@@ -109,9 +109,9 @@ export function MechanicJob() {
   }, [geo.coords, job, user, toast]);
 
   if (!user) return null;
-  if (job === 'loading') return <main className="container section-sm"><Skeleton className="h-40" /></main>;
+  if (job === 'loading') return <main className="container section-compact"><Skeleton className="h-40" /></main>;
   if (!job) return (
-    <main className="container section-sm">
+    <main className="container section-compact">
       <ErrorState kind="api" title="Job not found" description="The job may have been reassigned or cancelled." retryLabel="Back to dashboard" onRetry={() => navigate('/mechanic')} />
     </main>
   );
@@ -166,12 +166,13 @@ export function MechanicJob() {
   const liveTracking = LIVE_STATUSES.has(job.status);
 
   return (
-    <main className="container section-sm">
+    <main className="container section-compact">
       <FadeIn>
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-wider text-fg-muted">Job</div>
-            <h1 className="mt-2 display text-display-md text-fg-app">Service {job.id.slice(-6).toUpperCase()}</h1>
+          <div className="min-w-0">
+            <div className="text-xs uppercase tracking-wider text-fg-muted">Job · #{job.id.slice(-6).toUpperCase()} · {LABEL[job.status]}</div>
+            <h1 className="mt-2 display text-display-md text-fg-app">{job.problemCategory ?? 'Service request'}</h1>
+            <p className="mt-1 max-w-prose text-small text-fg-muted line-clamp-2">{job.problemText}</p>
           </div>
           <div className="flex items-center gap-2">
             {liveTracking && (
@@ -183,6 +184,12 @@ export function MechanicJob() {
           </div>
         </div>
       </FadeIn>
+
+      {/* Job progress — mirrors Tracking timeline, mechanic-side */}
+      <div className="mt-6">
+        <ProgressBar value={(['requested','accepted','on-the-way','arrived','service','completed'].indexOf(job.status) / 5) * 100} />
+        <div className="mt-1 flex justify-between text-[10px] font-mono text-fg-subtle"><span>Requested</span><span>Completed</span></div>
+      </div>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">

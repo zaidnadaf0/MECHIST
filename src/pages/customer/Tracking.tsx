@@ -56,7 +56,7 @@ export function Tracking() {
 
   if (req === 'loading') {
     return (
-      <main className="container section-sm">
+      <main className="container section-compact">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="mt-4 h-40" />
         <Skeleton className="mt-4 h-64" />
@@ -66,7 +66,7 @@ export function Tracking() {
 
   if (req === null) {
     return (
-      <main className="container section-sm">
+      <main className="container section-compact">
         <ErrorState kind="api" title="Request not found" description="This service may have ended or the link is invalid." retryLabel="Back to dashboard" onRetry={() => navigate('/dashboard')} />
       </main>
     );
@@ -91,7 +91,7 @@ export function Tracking() {
   }, [req]);
 
   return (
-    <main className="container section-sm">
+    <main className="container section-compact">
       <FadeIn>
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>

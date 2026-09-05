@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Badge, Select, useToast } from '@/components/ui';
-import { EmptyState, Skeleton } from '@/components/feedback';
+import { EmptyState, ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import { watchUsers, setUserRole, type UserSummary } from '@/lib/admin';
@@ -11,10 +11,11 @@ export function Users() {
   const navigate = useNavigate();
   const toast = useToast();
   const [items, setItems] = useState<UserSummary[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
-    const unsub = watchUsers(200, (u) => setItems(u));
+    const unsub = watchUsers(200, (u) => { setItems(u); setErr(null); }, (e) => setErr(e.message));
     return () => { if (unsub) unsub(); };
   }, [user, navigate]);
 
@@ -53,14 +54,16 @@ export function Users() {
   };
 
   return (
-    <main className="container section-sm">
+    <main className="container section-compact">
       <FadeIn>
         <div className="text-xs uppercase tracking-wider text-fg-muted">Users</div>
         <h1 className="mt-2 display text-display-md text-fg-app">All users</h1>
       </FadeIn>
 
       <div className="mt-8">
-        {items === null ? (
+        {err ? (
+          <ErrorState kind="api" title="Could not load users" description={err} onRetry={() => location.reload()} />
+        ) : items === null ? (
           <div className="grid gap-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
         ) : items.length === 0 ? (
           <EmptyState kind="generic" title="No users yet" description="User records will appear here." />
@@ -69,11 +72,11 @@ export function Users() {
             {items.map((u) => (
               <Card key={u.id}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-body font-medium text-fg-app">{u.displayName ?? u.email ?? u.id}</div>
-                    <div className="text-xs text-fg-muted">{u.email ?? '—'}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-body font-medium text-fg-app truncate max-w-[16rem]">{u.displayName ?? u.email ?? u.id}</div>
+                    <div className="text-xs text-fg-muted truncate max-w-[16rem]">{u.email ?? '—'}</div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-2">
                     <Badge tone={u.role === 'admin' ? 'danger' : u.role === 'mechanic' ? 'brand' : 'neutral'}>
                       {u.role ?? 'unset'}
                     </Badge>

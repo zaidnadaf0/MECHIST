@@ -48,18 +48,20 @@ export function MechanicDashboard() {
     let cancelled = false;
     let unsub: (() => void) | null = null;
     (async () => {
-      const [p, a, h] = await Promise.all([
+      const [p, aRes, hRes] = await Promise.all([
         getMechanicProfile(user.uid),
         listActiveJob(user.uid),
         listCompletedJobs(user.uid, 30),
       ]);
       if (cancelled) return;
       setProfile(p);
-      setActive(a);
-      setHistory(h);
+      setActive(aRes.data ?? null);
+      setHistory(hRes.data ?? []);
+      if (aRes.error) console.warn("[MechanicDashboard] listActiveJob failed:", aRes.error);
+      if (hRes.error) console.warn("[MechanicDashboard] listCompletedJobs failed:", hRes.error);
       unsub = watchIncoming((jobs) => {
         if (!cancelled) setIncoming(jobs);
-      }, user.uid);
+      }, undefined, user.uid);
     })();
     return () => {
       cancelled = true;
@@ -193,7 +195,7 @@ export function MechanicDashboard() {
   return (
     <>
       <PageTransition>
-        <div className="container section-sm">
+        <div className="container section-compact">
           <FadeIn>
           {loaded && status && (
             <VerificationBanner
@@ -351,7 +353,7 @@ export function MechanicDashboard() {
               <ul className="mt-3 grid gap-3">
 {offers.length === 0 ? (
                     <li>
-                      <EmptyState kind="incoming" title="Queue is quiet" description="New jobs appear here in realtime the moment a customer requests help." />
+                      <EmptyState compact kind="incoming" title="Queue is quiet" description="New jobs appear here in realtime the moment a customer requests help." />
                     </li>
                   ) : (
                     offers.map((j) => (
@@ -481,7 +483,7 @@ function OfferCard({
                   Decline
                 </Button>
               </div>
-              <Button variant="live" size="sm" loading={accepting} disabled={disabled && !accepting} onClick={onAccept} title={blockReason}>Accept</Button>
+              <Button variant="live" size="sm" loading={accepting} disabled={disabled} onClick={onAccept} title={blockReason}>Accept</Button> // Row 11 — pending/disabled guard, server transaction authoritative
             </div>
           </div>
         </div>

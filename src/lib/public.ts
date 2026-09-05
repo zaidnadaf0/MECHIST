@@ -55,7 +55,7 @@ export async function listPublicMechanics(max = 100): Promise<MechanicProfile[]>
 }
 
 /** Realtime variant: streams the public roster as availability changes. */
-export function watchPublicMechanics(max = 100, cb: (items: MechanicProfile[]) => void): Unsubscribe | null {
+export function watchPublicMechanics(max = 100, cb: (items: MechanicProfile[]) => void, onError?: (err: Error) => void): Unsubscribe | null {
   try {
     const d = requireDb();
     return onSnapshot(
@@ -67,7 +67,7 @@ export function watchPublicMechanics(max = 100, cb: (items: MechanicProfile[]) =
         limit(max),
       ),
       (snap) => cb(snap.docs.map((s) => asMechanic(s.id, s.data())).filter((m): m is MechanicProfile => Boolean(m))),
-      () => cb([]),
+      (err) => { cb([]); onError?.(err as Error); },
     );
   } catch {
     return null;
@@ -84,6 +84,6 @@ export async function listAllPublicMechanics(max = 200): Promise<MechanicProfile
 }
 
 /** Realtime variant for the customer request flow. */
-export function watchAllPublicMechanics(max = 200, cb: (items: MechanicProfile[]) => void): Unsubscribe | null {
-  return watchPublicMechanics(max, cb);
+export function watchAllPublicMechanics(max = 200, cb: (items: MechanicProfile[]) => void, onError?: (err: Error) => void): Unsubscribe | null {
+  return watchPublicMechanics(max, cb, onError);
 }

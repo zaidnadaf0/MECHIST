@@ -3,6 +3,7 @@ export { HeroMetrics }          from './HeroMetrics';
 export { Problems }             from './Problems';
 export { OperationsSnapshot }   from './OperationsSnapshot';
 export { HowItWorks }           from './HowItWorks';
+export { NearbyCTA }            from './NearbyCTA';
 export { LocationSection }      from './LocationSection';
 export { MechanicNetwork }      from './MechanicNetwork';
 export { IntelligentMatching }  from './IntelligentMatching';

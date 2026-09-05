@@ -1,9 +1,25 @@
 /**
- * MECHIST — nearby-mechanic filter.
+ * MECHIST — nearby-mechanic filter (Row 10 radius semantics).
  *
  * Pure functions so the same logic is exercised in tests and at runtime.
  * Firestore returns whatever the client queries for; this module is the
  * authoritative filter for "is this mechanic actually eligible right now".
+ *
+ * Radius semantics (Batch 4 row 10 — documented, not arbitrarily changed):
+ *   - Client display radius: 25 km default (`DISPATCH_RADIUS_KM`). This is the
+ *     distance threshold used by `nearbyMechanics()` / `RequestFlow` /
+ *     `MapPage` copy ("within ~25 km") and the fallback when a mechanic has no
+ *     explicit `serviceRadiusKm`.
+ *   - Server / per-mechanic radius: `mechanic.serviceRadiusKm ?? 50 km`, used
+ *     server-side in `functions/src/matching.ts:scoreMechanic()`. A mechanic's
+ *     own `serviceRadiusKm` overrides both defaults; setting it higher lets
+ *     rural/long-range mechanics be scored beyond the 25 km display bias without
+ *     changing the product's default UX promise.
+ *   - The two radii are intentionally different: the client radius is a
+ *     conservative UX filter so customers aren't shown far-away mechanics they
+ *     wouldn't reasonably wait for; the server radius is the operational outer
+ *     bound. "Document/unify" means calling out the choice in code and copy,
+ *     not collapsing one into the other.
  */
 import { distanceKm, type LatLng } from './geo';
 import type { MechanicProfile } from './mechanic';
@@ -61,6 +77,9 @@ export function problemCompatibility(
   return expected.some((need) => got.includes(stem(need)));
 }
 
+/** Default dispatch radius for the customer-facing UX (km). See module header Row 10. */
+export const DISPATCH_RADIUS_KM = 25;
+
 export interface NearbyMechanic {
   mechanic: MechanicProfile;
   distanceKm: number;
@@ -82,7 +101,7 @@ export function nearbyMechanics(
   mechanics: MechanicProfile[],
   opts: { radiusKm?: number; speedKmh?: number } = {},
 ): NearbyMechanic[] {
-  const radiusKm = opts.radiusKm ?? 25;
+  const radiusKm = opts.radiusKm ?? DISPATCH_RADIUS_KM;
   const speedKmh = opts.speedKmh ?? 35;
   const out: NearbyMechanic[] = [];
   for (const m of mechanics) {

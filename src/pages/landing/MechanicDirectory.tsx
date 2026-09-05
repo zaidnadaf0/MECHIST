@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Badge,
   Card,
@@ -30,6 +30,7 @@ function MechanicDirectoryInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [category, setCategory] = useState<'all' | ProblemCategory>('all');
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!firebaseConfigured) {
@@ -160,7 +161,16 @@ function MechanicDirectoryInner() {
             title="No mechanics online right now"
             description="Availability changes throughout the day. Check back in a few minutes, or sign up to be the first to join the network."
             ctaLabel="Become a mechanic"
-            onAction={() => { window.location.href = '/signup/mechanic'; }}
+            onAction={() => { navigate('/signup/mechanic'); }}
+          />
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            compact
+            kind="filtered"
+            title="No matches for this filter"
+            description="Try All specialties or a different category."
+            ctaLabel="Show all"
+            onAction={() => setCategory('all')}
           />
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

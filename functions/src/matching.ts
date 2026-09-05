@@ -53,6 +53,8 @@ export function scoreMechanic(
   );
   if (!Number.isFinite(km)) return -Infinity;
 
+  // Row 10 — per-mechanic server radius. See src/lib/nearby.ts (DISPATCH_RADIUS_KM = 25) for the client display radius.
+  // A mechanic's own serviceRadiusKm overrides both defaults; the server falls back to 50 km as the operational outer bound.
   const radius = mechanic.serviceRadiusKm ?? 50;
   if (km > radius) return -Infinity;
 
