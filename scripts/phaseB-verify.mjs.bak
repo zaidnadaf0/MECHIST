@@ -1,0 +1,152 @@
+#!/usr/bin/env node
+import { strict as assert } from 'node:assert';
+function memDb(seed) {
+  const cols = new Map();
+  for (const [name, docs] of Object.entries(seed || {})) {
+    const m = new Map();
+    for (const d of docs) m.set(d.id, { ...d });
+    cols.set(name, m);
+  }
+  function col(name) {
+    if (!cols.has(name)) cols.set(name, new Map());
+    const m = cols.get(name);
+    return {
+      doc(id) {
+        return {
+          id,
+          async get() {
+            const data = m.get(id);
+            return { exists: !!data, id, data: () => (data ? { ...data } : undefined), ref: this };
+          },
+          async update(patch) {
+            const cur = m.get(id);
+            if (!cur) throw new Error('not-found');
+            m.set(id, { ...cur, ...patch });
+          },
+          async set(data) { m.set(id, { ...data, id }); },
+        };
+      },
+      where(field, op, value) {
+        const filters = [{ field, op, value }];
+        const q = {
+          where(f2, op2, v2) { filters.push({ field: f2, op: op2, value: v2 }); return q; },
+          limit(n) { q._limit = n; return q; },
+          async get() {
+            let out = [...m.values()];
+            for (const f of filters) {
+              if (f.op === '==') out = out.filter((d) => d[f.field] === f.value);
+              else if (f.op === '<') out = out.filter((d) => d[f.field] != null && d[f.field] < f.value);
+              else throw new Error('unsupported op ' + f.op);
+            }
+            if (q._limit != null) out = out.slice(0, q._limit);
+            const docs = out.map((d) => ({ id: d.id, data: () => ({ ...d }), ref: col(name).doc(d.id) }));
+            return { empty: docs.length === 0, size: docs.length, docs };
+          },
+        };
+        return q;
+      },
+      async get() {
+        const docs = [...m.values()].map((d) => ({ id: d.id, data: () => ({ ...d }), ref: col(name).doc(d.id) }));
+        return { empty: docs.length === 0, size: docs.length, docs };
+      },
+    };
+  }
+  return {
+    collection: col,
+    batch() {
+      const ops = [];
+      return { update(ref, patch) { ops.push([ref, patch]); }, async commit() { for (const [ref, patch] of ops) await ref.update(patch); } };
+    },
+    async runTransaction(fn) {
+      const tx = { async get(ref) { return ref.get(); }, update(ref, patch) { return ref.update(patch); } };
+      return fn(tx);
+    },
+  };
+}
+async function loadMatching() {
+  const mod = await import('../functions/lib/matching.js');
+  return mod;
+}
+function req(overrides = {}) {
+  return {
+    id: 'req-1', customerId: 'cust-1', vehicleId: 'veh-1',
+    problemText: 'flat tyre', problemCategory: 'tyre',
+    status: 'requested', customerLat: 12.9716, customerLng: 77.5946,
+    mechanicId: null, mechanicName: null,
+    createdAt: Date.now(), updatedAt: Date.now(),
+    offerExpiresAt: Date.now() + 120000, declinedBy: [], ...overrides,
+  };
+}
+function mech(id, overrides = {}) {
+  return {
+    id, name: 'M-' + id, approved: true, isAvailable: true,
+    specialties: ['tyre'], baseLat: 12.9716, baseLng: 77.5946,
+    serviceRadiusKm: 50, rating: 4.5, reviewCount: 10, ...overrides,
+  };
+}
+async function runUnit() {
+  const { findEligibleMechanics, needsRematching, resetRequestForRematch, deriveEtaMinutes, scoreMechanic } = await loadMatching();
+  const failures = [];
+  async function check(name, fn) {
+    try { await fn(); console.log('OK  ', name); } catch (e) { failures.push(name); console.error('FAIL', name, e && e.message ? e.message : e); if (e && e.stack) console.error(e.stack); }
+  }
+  await check('new request picks top candidate', async () => {
+    const db = memDb({ mechanics: [mech('m1', { rating: 5 }), mech('m2', { rating: 3 })], requests: [req()] });
+    const cands = await findEligibleMechanics(db, req(), []);
+    assert.ok(cands.length >= 2); assert.equal(cands[0].mechanic.id, 'm1');
+  });
+  await check('decline excludes declinedBy from next round', async () => {
+    const db = memDb({ mechanics: [mech('m1'), mech('m2')], requests: [] });
+    const r = req({ declinedBy: ['m1'] });
+    const cands = await findEligibleMechanics(db, r, r.declinedBy);
+    assert.ok(cands.every((c) => c.mechanic.id !== 'm1')); assert.equal(cands[0].mechanic.id, 'm2');
+  });
+  await check('offer expiry needsRematching only when requested unassigned expired', async () => {
+    assert.equal(needsRematching(req({ status: 'requested', mechanicId: null, offerExpiresAt: Date.now() - 1000 })), true);
+    assert.equal(needsRematching(req({ status: 'accepted', mechanicId: 'm1', offerExpiresAt: Date.now() - 1000 })), false);
+    assert.equal(needsRematching(req({ status: 'requested', mechanicId: null, offerExpiresAt: Date.now() + 100000 })), false);
+    assert.equal(needsRematching(req({ status: 'requested', mechanicId: 'm1', offerExpiresAt: Date.now() - 1000 })), false);
+  });
+  await check('stale resetRequestForRematch clears assignment and extends window', async () => {
+    const db = memDb({ requests: [{ id: 'req-1', status: 'accepted', mechanicId: 'm1', mechanicName: 'M-m1', mechanicLat: 1, mechanicLng: 1, offerExpiresAt: 1, updatedAt: Date.now() - 40*60*1000 }] });
+    const ok = await resetRequestForRematch(db, 'req-1'); assert.equal(ok, true);
+    const cur = (await db.collection('requests').doc('req-1').get()).data();
+    assert.equal(cur.status, 'requested'); assert.equal(cur.mechanicId, null); assert.ok(cur.offerExpiresAt > Date.now());
+  });
+  await check('release back to queue next rematch finds candidates', async () => {
+    const db = memDb({ mechanics: [mech('m1'), mech('m2')], requests: [req({ status: 'accepted', mechanicId: 'm1', mechanicName: 'M-m1' })] });
+    await resetRequestForRematch(db, 'req-1');
+    const cur = (await db.collection('requests').doc('req-1').get()).data();
+    assert.equal(cur.status, 'requested'); assert.equal(cur.mechanicId, null);
+    const cands = await findEligibleMechanics(db, { ...req(), ...cur, id: 'req-1' }, []);
+    assert.ok(cands.length > 0);
+  });
+  await check('no duplicate assignment second assign sees already-assigned', async () => {
+    const db = memDb({ mechanics: [mech('m1'), mech('m2')], requests: [req()] });
+    const r = req();
+    const cands = await findEligibleMechanics(db, r, []);
+    await db.collection('requests').doc('req-1').update({ status: 'accepted', mechanicId: cands[0].mechanic.id, mechanicName: cands[0].mechanic.name });
+    const cur = (await db.collection('requests').doc('req-1').get()).data();
+    assert.equal(cur.status, 'accepted'); assert.ok(cur.mechanicId);
+    assert.equal(needsRematching({ ...r, ...cur }), false);
+  });
+  await check('forceRematch guard non-rematchable completed rejected', async () => {
+    function isRematchable(s) { return s.status === 'requested' || ['accepted','on-the-way','arrived','service'].includes(s.status); }
+    assert.equal(isRematchable(req({ status: 'completed', mechanicId: 'm1' })), false);
+    assert.equal(isRematchable(req({ status: 'requested', mechanicId: null })), true);
+    assert.equal(isRematchable(req({ status: 'accepted', mechanicId: 'm1' })), true);
+  });
+  await check('deriveEtaMinutes nearby mechanic gives finite ETA', async () => {
+    const eta = deriveEtaMinutes({ lat: 12.9716, lng: 77.5946 }, req({ etaMin: 15 }));
+    assert.ok(Number.isFinite(eta) && eta >= 1);
+  });
+  await check('scoreMechanic unavailable scores -Infinity', async () => {
+    const sc = scoreMechanic(mech('m1'), req()); assert.ok(Number.isFinite(sc));
+    assert.equal(scoreMechanic(mech('m2', { isAvailable: false }), req()), -Infinity);
+  });
+  console.log(failures.length ? '\n' + failures.length + ' FAILED: ' + failures.join(', ') : '\nAll 9 checks passed');
+  process.exit(failures.length ? 1 : 0);
+}
+const mode = process.argv.includes('--emulator') ? 'emulator' : 'unit';
+if (mode === 'emulator') { console.error('Emulator mode not implemented; use --unit'); process.exit(2); }
+else runUnit().catch((e) => { console.error(e); process.exit(1); });

@@ -159,7 +159,7 @@ export const REASONS: ReasonMeta[] = [
   { key: 'close',      label: 'Close to you',            icon: MapPin },
   { key: 'specialty',  label: 'Relevant specialization', icon: Wrench },
   { key: 'rating',     label: 'Strong rating',           icon: CheckCircle2 },
-  { key: 'approved',   label: 'Verified by MECHIST',     icon: CheckCircle2 },
+  { key: 'approved',   label: 'Verified by RoadAssisst',     icon: CheckCircle2 },
   { key: 'experience', label: 'Years of experience',     icon: PauseCircle },
 ];
 

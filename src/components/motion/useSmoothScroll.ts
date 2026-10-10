@@ -12,11 +12,11 @@ gsap.registerPlugin(ScrollTrigger);
  * each other. Honours prefers-reduced-motion: Lenis is disabled
  * (native scroll restored) and ScrollTrigger still works, just instantly.
  */
-export function useSmoothScroll() {
+export function useSmoothScroll(enabled = true) {
   const reduced = usePrefersReducedMotion();
 
   useEffect(() => {
-    if (reduced) {
+    if (!enabled || reduced) {
       ScrollTrigger.refresh();
       return;
     }
@@ -48,5 +48,5 @@ export function useSmoothScroll() {
       lenis.destroy();
       ScrollTrigger.getAll().forEach((st) => st.kill());
     };
-  }, [reduced]);
+  }, [reduced, enabled]);
 }

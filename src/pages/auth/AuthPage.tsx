@@ -10,7 +10,6 @@
  * model needs garage, address, specialisation, vehicle types, etc.
  * Admins are not self-provisioned — the custom claim is set out of band.
  */
-import { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight, Car, Gauge, Radio, ShieldCheck, Sparkles, Star, Wrench, type LucideIcon,
@@ -18,6 +17,7 @@ import {
 import { Badge, Button, Card, IconTile } from '@/components/ui';
 import { FadeIn, PageTransition } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
+import { enterDemo } from '@/lib/demo';
 
 type Hue = 'azure' | 'aqua' | 'iris' | 'gold';
 
@@ -66,7 +66,7 @@ const ROLES: RoleCard[] = [
     id: 'admin',
     eyebrow: 'For staff',
     title: 'Admin',
-    body: 'Manage the MECHIST platform: review mechanic applications, oversee requests, and keep the network healthy.',
+    body: 'Manage the RoadAssisst network: review mechanic applications, oversee requests, and keep the network healthy.',
     cta: 'Open staff sign-in',
     ctaHref: '/admin/login',
     icon: Gauge,
@@ -94,22 +94,16 @@ const PROOF: { icon: LucideIcon; hue: Hue; title: string; body: string }[] = [
 ];
 
 export function AuthPage() {
-  const { user, role, configured } = useAuth();
+  const { user, role, configured, signOut } = useAuth();
   const navigate = useNavigate();
+  const noRole = new URLSearchParams(window.location.search).get('norole') === '1';
 
-  // If someone is already signed in, take them to the right portal.
-  // The role is the resolved Firestore role from AuthProvider, which is
-  // either 'customer' | 'mechanic' | 'admin' (resolved) or 'unknown'
-  // (still resolving). The route guards elsewhere will hold the user in
-  // place until that resolves, so the only safe action here is to send a
-  // fully-resolved user to their portal.
-  useEffect(() => {
-    if (user && role && role !== 'unknown') {
-      if (role === 'admin') navigate('/admin', { replace: true });
-      else if (role === 'mechanic') navigate('/mechanic', { replace: true });
-      else if (role === 'customer') navigate('/dashboard', { replace: true });
-    }
-  }, [user, role, navigate]);
+  // Signed-in users can still VIEW this page (role tiles, signup links).
+  // Instead of auto-redirecting away, show an inline "already signed in"
+  // banner with explicit actions. Route guards remain authoritative.
+  const signedIn = Boolean(user) && role !== null && role !== 'unknown';
+  const portalFor = (r: typeof role): string =>
+    r === 'admin' ? '/admin' : r === 'mechanic' ? '/mechanic' : '/dashboard';
 
   return (
     <PageTransition>
@@ -123,9 +117,9 @@ export function AuthPage() {
               <div className="flex flex-col items-center gap-3 text-center">
                 <IconTile icon={<Sparkles className="h-5 w-5" />} hue="azure" />
                 <div className="flex flex-col items-center gap-2">
-                  <div className="eyebrow">Sign in to MECHIST</div>
+                  <div className="eyebrow">Sign in to RoadAssisst</div>
                   <h1 className="display text-display-sm text-fg-app text-balance">
-                    Choose how you're using <span className="text-gradient-signal">MECHIST</span>
+                    Choose how you're using <span className="text-gradient-signal">RoadAssisst</span>
                   </h1>
                 </div>
                 <p className="max-w-xl text-body text-fg-muted text-pretty">
@@ -149,6 +143,43 @@ export function AuthPage() {
               </FadeIn>
             )}
 
+            {(noRole || (user && role === null)) && (
+              <FadeIn>
+                <div className="rounded-xl border border-warning-500/30 bg-warning-500/10 p-5 text-center">
+                  <div className="text-body font-medium text-fg-app">This sign-in has no RoadAssisst profile yet</div>
+                  <p className="mx-auto mt-1 max-w-xl text-small text-fg-muted">
+                    {user?.email ? <>{user.email} is authenticated, but there is no <code className="font-mono">users/{user.uid}</code> doc with a role. </> : null}
+                    BACKUP demo emails do not exist in this Firestore project — create a real account below, then sign in through the matching portal. Admins need a custom claim (see below).
+                  </p>
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                    <Button variant="primary" size="sm" onClick={() => navigate('/signup/customer')}>Create customer account</Button>
+                    <Button variant="secondary" size="sm" onClick={() => navigate('/signup/mechanic')}>Apply as mechanic</Button>
+                    <Button variant="ghost" size="sm" onClick={() => void signOut()}>Sign out</Button>
+                  </div>
+                  <p className="mt-3 text-xs text-fg-subtle">
+                    Staff: <code className="font-mono">node scripts/setAdminClaim.mjs --uid &lt;UID&gt;</code> with <code className="font-mono">GOOGLE_APPLICATION_CREDENTIALS</code> set, then sign out/in again. Mechanics appear in the queue only after admin approval + availability on.
+                  </p>
+                </div>
+              </FadeIn>
+            )}
+
+            {signedIn && (
+              <FadeIn>
+                <div className="flex flex-wrap items-center justify-center gap-3 rounded-xl border border-line-soft bg-surface-1/70 px-5 py-4 text-center">
+                  <span className="text-small text-fg-muted">
+                    Signed in as <span className="font-medium text-fg-app">{user?.email}</span>
+                    {` (${role})`}.
+                  </span>
+                  <Button variant="primary" size="sm" onClick={() => navigate(portalFor(role))}>
+                    Go to my portal
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => void signOut()}>
+                    Sign out
+                  </Button>
+                </div>
+              </FadeIn>
+            )}
+
             <div className="grid items-stretch gap-5 md:grid-cols-3" data-testid="role-grid">
               {ROLES.map((r, i) => (
                 <FadeIn key={r.id} delay={0.04 * (i + 1)}>
@@ -156,6 +187,20 @@ export function AuthPage() {
                 </FadeIn>
               ))}
             </div>
+
+            <FadeIn delay={0.16}>
+              <div className="rounded-xl border border-dashed border-line-soft bg-surface-1/60 p-5 text-center">
+                <div className="eyebrow">No backend yet? Preview with sample data</div>
+                <p className="mx-auto mt-1 max-w-xl text-small text-fg-muted">
+                  BACKUP-style demo: instant dashboards with clearly-labeled sample data in this browser only. Nothing is real until Firestore exists.
+                </p>
+                <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => enterDemo('customer')}>Preview customer</Button>
+                  <Button variant="secondary" size="sm" onClick={() => enterDemo('mechanic')}>Preview mechanic</Button>
+                  <Button variant="secondary" size="sm" onClick={() => enterDemo('admin')}>Preview admin</Button>
+                </div>
+              </div>
+            </FadeIn>
 
             <FadeIn delay={0.18}>
               <div className="flex flex-col gap-5 rounded-xl border border-line-soft bg-surface-1/60 p-6 backdrop-blur-sm">

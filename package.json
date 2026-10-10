@@ -13,6 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:rules": "node scripts/check-rules.mjs",
+    "migrate:contacts": "node scripts/migrate-mechanic-contacts.mjs --apply",
     "verify:phaseB": "node scripts/phaseB-verify.mjs --unit",
     "verify:all": "npm run lint:rules && npm run verify:phaseB && npm run test",
     "emulators": "firebase emulators:start --only firestore,functions,auth,pubsub,storage --import=./emulator-data --export-on-exit 2>&1 | cat",

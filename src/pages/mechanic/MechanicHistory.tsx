@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Badge } from '@/components/ui';
+import { Card, Stars, StatusPill } from '@/components/ui';
 import { EmptyState, ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import { listCompletedJobs } from '@/lib/mechanic';
+import { money } from '@/lib/format';
 import type { ServiceRequest } from '@/lib/customer';
 
 export function MechanicHistory() {
@@ -41,12 +42,27 @@ export function MechanicHistory() {
             {items.map((r) => (
               <Card key={r.id}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <div className="text-body font-medium text-fg-app">Service {r.id.slice(-6).toUpperCase()}</div>
-                    <div className="text-xs text-fg-muted">{new Date(r.updatedAt).toLocaleString()}</div>
+                  <div className="min-w-0">
+                    <div className="text-body font-medium text-fg-app">
+                      {r.problemCategory ?? 'Service'} · {r.id.slice(-6).toUpperCase()}
+                    </div>
+                    <div className="text-xs text-fg-muted">
+                      Completed {new Date(r.updatedAt).toLocaleString()}
+                      {r.durationMin != null ? ` · ${r.durationMin} min on site` : ''}
+                    </div>
                     <p className="mt-1 text-small text-fg-muted line-clamp-1">{r.problemText}</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-fg-muted">
+                      {r.amountCents != null
+                        ? <span className="font-medium text-fg-app">{money(r.amountCents / 100)}</span>
+                        : <span>No recorded amount</span>}
+                      {typeof r.rating === 'number' && (
+                        <span className="inline-flex items-center gap-1">
+                          <Stars value={r.rating} size="xs" /> {r.rating}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <Badge tone="success">Completed</Badge>
+                  <StatusPill status="completed" size="sm" />
                 </div>
               </Card>
             ))}

@@ -1,0 +1,18 @@
+{
+  "seed": 42,
+  "trained_at": "2026-09-09T09:50:41.647151+00:00",
+  "python": "3.13.12",
+  "sklearn": "1.8.0",
+  "pandas": "3.0.5",
+  "numpy": "2.4.2",
+  "feature_dim": 34,
+  "train_rows": 1386,
+  "models": {
+    "decision_tree": "DecisionTreeClassifier {'ccp_alpha': 0.0, 'class_weight': None, 'criterion': 'gini', 'max_depth': 8, 'max_features': None, 'max_leaf_nodes': None, 'min_impurity_decrease': 0.0, 'min_samples_leaf': 4, 'min_samples_split': 2,",
+    "random_forest": "RandomForestClassifier {'bootstrap': True, 'ccp_alpha': 0.0, 'class_weight': None, 'criterion': 'gini', 'max_depth': 12, 'max_features': 'sqrt', 'max_leaf_nodes': None, 'max_samples': None, 'min_impurity_decrease': 0.0, 'mi",
+    "knn": "KNeighborsClassifier {'algorithm': 'auto', 'leaf_size': 30, 'metric': 'minkowski', 'metric_params': None, 'n_jobs': -1, 'n_neighbors': 7, 'p': 2, 'weights': 'distance'}",
+    "logistic_regression": "LogisticRegression {'C': 1.0, 'class_weight': None, 'dual': False, 'fit_intercept': True, 'intercept_scaling': 1, 'l1_ratio': 0.0, 'max_iter': 500, 'n_jobs': None, 'penalty': 'deprecated', 'random_state': 42, 'solver': "
+  },
+  "sha256_feature_matrix": "160d9352bd471ee375e7cf15d5d9c64dc1329339ae2736db403a0fb12fdc6aa4",
+  "sha256_schema": "b82cc40c501ac83a74cacd4c445963f18a4f37af7bcf7401aaf04192ba2a43a1"
+}

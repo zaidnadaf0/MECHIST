@@ -1,0 +1,432 @@
+<title>Portal Rewire</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#F6F7F9;
+    --surface-1:#FFFFFF;
+    --surface-2:#F1F5F9;
+    --surface-3:#E2E8F0;
+    --line-soft:#E2E8F0;
+    --line-strong:#CBD5E1;
+    --fg-app:#0B1220;
+    --fg-muted:#5B6577;
+    --fg-subtle:#8A95A8;
+    --azure:#0EA5E9;
+    --azure-600:#0284C7;
+    --azure-soft:rgba(14,165,233,0.10);
+    --aqua:#059DB5;
+    --aqua-soft:rgba(5,157,181,0.11);
+    --iris:#6D5EF6;
+    --iris-soft:rgba(109,94,246,0.10);
+    --gold:#C8900A;
+    --gold-soft:rgba(200,144,10,0.12);
+    --success:#0E9F6B;
+    --success-soft:rgba(14,159,107,0.12);
+    --warning:#D97706;
+    --radius:14px;
+    --radius-sm:10px;
+    --shadow:0 1px 2px rgba(16,24,40,0.06), 0 8px 24px rgba(16,24,40,0.06);
+    --shadow-lg:0 8px 32px rgba(16,24,40,0.10), 0 1px 3px rgba(16,24,40,0.08);
+  }
+  :root:not([data-theme="light"]) {}
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#070A12;
+      --surface-1:#0F172A;
+      --surface-2:#162032;
+      --surface-3:#1E2E4A;
+      --line-soft:#1E2E4A;
+      --line-strong:#263A5E;
+      --fg-app:#E8EEF8;
+      --fg-muted:#8EA0BE;
+      --fg-subtle:#5E7292;
+      --azure-soft:rgba(14,165,233,0.16);
+      --aqua-soft:rgba(5,157,181,0.16);
+      --iris-soft:rgba(109,94,246,0.16);
+      --gold-soft:rgba(200,144,10,0.16);
+      --success-soft:rgba(14,159,107,0.18);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#070A12;
+    --surface-1:#0F172A;
+    --surface-2:#162032;
+    --surface-3:#1E2E4A;
+    --line-soft:#1E2E4A;
+    --line-strong:#263A5E;
+    --fg-app:#E8EEF8;
+    --fg-muted:#8EA0BE;
+    --fg-subtle:#5E7292;
+    --azure-soft:rgba(14,165,233,0.16);
+    --aqua-soft:rgba(5,157,181,0.16);
+    --iris-soft:rgba(109,94,246,0.16);
+    --gold-soft:rgba(200,144,10,0.16);
+    --success-soft:rgba(14,159,107,0.18);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg);
+    color:var(--fg-app);
+    font-family:Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size:14px;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit}
+  .topbar{
+    position:sticky; top:0; z-index:40;
+    backdrop-filter:blur(16px);
+    background:color-mix(in srgb, var(--bg) 84%, transparent);
+    border-bottom:1px solid var(--line-soft);
+  }
+  .topbar-inner{
+    max-width:1180px; margin:0 auto; padding:12px 20px;
+    display:flex; align-items:center; justify-content:space-between; gap:16px;
+  }
+  .brand{display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:-0.02em}
+  .brand-mark{
+    width:32px; height:32px; border-radius:8px;
+    background:linear-gradient(135deg, #0EA5E9 0%, #6D5EF6 55%, #059DB5 100%);
+    display:grid; place-items:center; color:white; font-family:Space Grotesk, sans-serif; font-weight:700; font-size:13px;
+    box-shadow:0 2px 10px rgba(14,165,233,0.35);
+  }
+  .brand small{font-weight:600; color:var(--fg-subtle); letter-spacing:0.06em; text-transform:uppercase; font-size:10px}
+  .top-actions{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .pill{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:6px 10px; border-radius:999px; font-size:11px; font-weight:600;
+    border:1px solid var(--line-soft); background:var(--surface-1); color:var(--fg-muted);
+    font-family:JetBrains Mono, monospace;
+  }
+  .pill.live{border-color:rgba(14,159,107,0.30); background:var(--success-soft); color:var(--success)}
+  .pill.iris{border-color:rgba(109,94,246,0.25); background:var(--iris-soft); color:var(--iris)}
+  .pill.azure{border-color:rgba(14,165,233,0.25); background:var(--azure-soft); color:var(--azure-600)}
+  .dot{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 0 4px color-mix(in srgb, currentColor 18%, transparent)}
+  .wrap{max-width:1180px; margin:0 auto; padding:0 20px}
+  .hero{padding:28px 0 8px; display:grid; gap:18px}
+  .hero-grid{display:grid; grid-template-columns:1.15fr 0.85fr; gap:18px; align-items:start}
+  @media (max-width:900px){ .hero-grid{grid-template-columns:1fr} }
+  .kicker{display:inline-flex; align-items:center; gap:8px; font-size:11px; font-weight:700; letter-spacing:0.10em; text-transform:uppercase; color:var(--fg-subtle)}
+  .kicker i{width:20px;height:1px;background:linear-gradient(90deg, var(--azure), transparent); display:inline-block}
+  h1{font-family:Space Grotesk, sans-serif; font-size:42px; line-height:0.95; letter-spacing:-0.04em; font-weight:700; margin:6px 0 0; text-wrap:balance}
+  h1 em{font-style:normal; background:linear-gradient(90deg, var(--azure-600), var(--iris)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text}
+  .lede{max-width:58ch; color:var(--fg-muted); font-size:15px; line-height:1.6}
+  .lede strong{color:var(--fg-app); font-weight:600}
+  .hero-card{background:var(--surface-1); border:1px solid var(--line-soft); border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden}
+  .hero-card-head{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line-soft); font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--fg-subtle)}
+  .hero-card-head b{color:var(--fg-app); letter-spacing:0.02em; text-transform:none; font-size:13px}
+  .commit-row{display:flex; align-items:center; gap:8px; font-family:JetBrains Mono, monospace; font-size:11px}
+  .commit-row code{background:var(--surface-2); border:1px solid var(--line-soft); padding:4px 8px; border-radius:8px; color:var(--fg-muted)}
+  .diagram{padding:14px; background:linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px), var(--surface-1); background-size:22px 22px, 22px 22px, auto}
+  .diagram-inner{display:grid; gap:10px}
+  .lane-label{font-size:10px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:var(--fg-subtle); display:flex; align-items:center; gap:8px}
+  .lane-label::after{content:""; flex:1; height:1px; background:var(--line-soft)}
+  .nodes{display:grid; grid-template-columns:repeat(3, 1fr); gap:10px}
+  @media (max-width:720px){ .nodes{grid-template-columns:1fr} }
+  .node{position:relative; background:var(--surface-1); border:1px solid var(--line-soft); border-radius:12px; padding:12px 12px 10px; display:flex; flex-direction:column; gap:8px; transition:border-color .2s, box-shadow .2s, transform .2s; cursor:pointer}
+  .node:hover{border-color:var(--line-strong); box-shadow:var(--shadow); transform:translateY(-1px)}
+  .node.active{border-color:var(--azure); box-shadow:0 0 0 3px var(--azure-soft)}
+  .node.active.aqua{border-color:var(--aqua); box-shadow:0 0 0 3px var(--aqua-soft)}
+  .node.active.iris{border-color:var(--iris); box-shadow:0 0 0 3px var(--iris-soft)}
+  .node-top{display:flex; align-items:center; justify-content:space-between; gap:8px}
+  .node-icon{width:28px; height:28px; border-radius:8px; display:grid; place-items:center; font-size:14px; border:1px solid var(--line-soft)}
+  .node-icon.azure{background:var(--azure-soft); color:var(--azure-600); border-color:rgba(14,165,233,0.25)}
+  .node-icon.aqua{background:var(--aqua-soft); color:var(--aqua); border-color:rgba(5,157,181,0.25)}
+  .node-icon.iris{background:var(--iris-soft); color:var(--iris); border-color:rgba(109,94,246,0.25)}
+  .node h3{font-size:13px; font-weight:700; letter-spacing:-0.02em; margin:0}
+  .node p{font-size:12px; color:var(--fg-muted); margin:0; line-height:1.5}
+  .node-meta{display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+  .chip{display:inline-flex; align-items:center; gap:4px; font-size:10px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; padding:4px 7px; border-radius:999px; border:1px solid var(--line-soft); background:var(--surface-2); color:var(--fg-muted); font-family:JetBrains Mono, monospace}
+  .chip.ok{border-color:rgba(14,159,107,0.25); background:var(--success-soft); color:var(--success)}
+  .route{display:flex; align-items:center; gap:6px; font-family:JetBrains Mono, monospace; font-size:11px; color:var(--fg-subtle)}
+  .route b{color:var(--fg-app); font-weight:600}
+  .arrow{color:var(--line-strong)}
+  .guard{display:grid; grid-template-columns:auto 1fr auto; gap:12px; align-items:center; background:var(--surface-2); border:1px solid var(--line-soft); border-radius:12px; padding:10px 12px}
+  @media (max-width:720px){ .guard{grid-template-columns:1fr} }
+  .guard-icon{width:36px; height:36px; border-radius:10px; display:grid; place-items:center; background:var(--surface-1); border:1px solid var(--line-soft); color:var(--iris)}
+  .guard pre{margin:0; font-family:JetBrains Mono, monospace; font-size:11px; line-height:1.5; background:var(--surface-1); border:1px solid var(--line-soft); border-radius:10px; padding:10px 12px; overflow:auto; color:var(--fg-app)}
+  .guard pre s{color:var(--fg-subtle); text-decoration:none}
+  .guard pre em{font-style:normal; color:var(--success); font-weight:600}
+  .toggle{display:inline-flex; background:var(--surface-2); border:1px solid var(--line-soft); border-radius:999px; padding:3px; gap:3px}
+  .toggle button{appearance:none; border:0; background:transparent; color:var(--fg-muted); font-size:12px; font-weight:700; padding:6px 12px; border-radius:999px; cursor:pointer; transition:all .2s; font-family:Inter, sans-serif}
+  .toggle button[aria-pressed="true"]{background:var(--surface-1); color:var(--fg-app); box-shadow:var(--shadow); border:1px solid var(--line-soft)}
+  .section{padding:22px 0 0}
+  .section-head{display:flex; align-items:end; justify-content:space-between; gap:16px; flex-wrap:wrap; padding-bottom:12px; border-bottom:1px solid var(--line-soft); margin-bottom:14px}
+  .section-head h2{font-family:Space Grotesk, sans-serif; font-size:22px; letter-spacing:-0.03em; margin:0; line-height:1}
+  .section-head p{margin:4px 0 0; color:var(--fg-muted); font-size:13px; max-width:56ch}
+  .eyebrow{font-size:10px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:var(--fg-subtle); display:flex; align-items:center; gap:8px}
+  .eyebrow::before{content:""; width:14px; height:2px; border-radius:999px; background:var(--azure)}
+  .eyebrow.aqua::before{background:var(--aqua)}
+  .eyebrow.iris::before{background:var(--iris)}
+  .icon-grid{display:grid; grid-template-columns:repeat(4, 1fr); gap:10px}
+  @media (max-width:1000px){ .icon-grid{grid-template-columns:repeat(2, 1fr)} }
+  @media (max-width:560px){ .icon-grid{grid-template-columns:1fr} }
+  .file-card{background:var(--surface-1); border:1px solid var(--line-soft); border-radius:12px; padding:12px; display:flex; flex-direction:column; gap:10px}
+  .file-card-head{display:flex; align-items:center; justify-content:space-between; gap:8px}
+  .file-name{font-family:JetBrains Mono, monospace; font-size:11px; font-weight:600; color:var(--fg-app); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .file-count{font-size:11px; font-weight:700; color:var(--success); background:var(--success-soft); border:1px solid rgba(14,159,107,0.2); padding:3px 7px; border-radius:999px}
+  .swatch-row{display:flex; align-items:center; gap:8px}
+  .swatch{flex:1; height:36px; border-radius:10px; border:1px solid var(--line-soft); display:flex; align-items:center; justify-content:center; gap:6px; font-size:11px; font-weight:600}
+  .swatch.before{background: repeating-linear-gradient(-45deg, var(--surface-2), var(--surface-2) 6px, var(--surface-1) 6px, var(--surface-1) 12px); color:var(--fg-subtle)}
+  .swatch.after{background:var(--surface-2); color:var(--fg-app); border-color:var(--line-strong)}
+  .swatch i{width:14px;height:14px;border-radius:4px; display:grid; place-items:center; font-style:normal; font-size:10px}
+  .file-card p{margin:0; font-size:11px; color:var(--fg-muted); line-height:1.5}
+  .gates{display:grid; grid-template-columns:repeat(3, 1fr); gap:10px}
+  @media (max-width:860px){ .gates{grid-template-columns:repeat(2, 1fr)} }
+  @media (max-width:560px){ .gates{grid-template-columns:1fr} }
+  .gate{background:var(--surface-1); border:1px solid var(--line-soft); border-radius:12px; padding:12px; display:flex; gap:10px; align-items:flex-start}
+  .gate-mark{width:28px; height:28px; border-radius:8px; display:grid; place-items:center; flex-shrink:0; background:var(--success-soft); color:var(--success); border:1px solid rgba(14,159,107,0.2); font-weight:700; font-size:12px}
+  .gate h4{margin:0; font-size:12px; font-weight:700; letter-spacing:-0.01em}
+  .gate p{margin:2px 0 0; font-size:11px; color:var(--fg-muted); line-height:1.5}
+  .gate code{font-family:JetBrains Mono, monospace; font-size:10px; background:var(--surface-2); border:1px solid var(--line-soft); padding:2px 6px; border-radius:6px; color:var(--fg-muted)}
+  .table-wrap{background:var(--surface-1); border:1px solid var(--line-soft); border-radius:12px; overflow:hidden; box-shadow:var(--shadow)}
+  .table-head{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line-soft); font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--fg-subtle)}
+  table{width:100%; border-collapse:collapse; font-size:12px}
+  th{text-align:left; font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--fg-subtle); padding:10px 14px; border-bottom:1px solid var(--line-soft); background:var(--surface-2); white-space:nowrap}
+  td{padding:10px 14px; border-bottom:1px solid var(--line-soft); vertical-align:top}
+  tr:last-child td{border-bottom:0}
+  td.mono{font-family:JetBrains Mono, monospace; font-size:11px; color:var(--fg-muted)}
+  .add{color:var(--success); font-weight:600}
+  .sub{color:var(--fg-subtle)}
+  .scope{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  @media (max-width:720px){ .scope{grid-template-columns:1fr} }
+  .scope-card{background:var(--surface-1); border:1px solid var(--line-soft); border-radius:12px; padding:12px; display:flex; gap:10px}
+  .scope-card.ok{border-color:rgba(14,159,107,0.25)}
+  .scope-card.warn{border-color:rgba(217,119,6,0.25)}
+  .scope-icon{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex-shrink:0; font-size:14px}
+  .scope-card.ok .scope-icon{background:var(--success-soft); color:var(--success)}
+  .scope-card.warn .scope-icon{background:rgba(217,119,6,0.12); color:var(--warning)}
+  .scope-card h4{margin:0; font-size:12px; font-weight:700}
+  .scope-card p{margin:2px 0 0; font-size:11px; color:var(--fg-muted); line-height:1.5}
+  footer{margin-top:22px; padding:16px 0 24px; border-top:1px solid var(--line-soft); display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:11px; color:var(--fg-subtle); font-family:JetBrains Mono, monospace}
+  .cta{display:inline-flex; align-items:center; gap:8px; background:var(--fg-app); color:var(--bg); padding:10px 14px; border-radius:999px; font-weight:700; font-size:13px; text-decoration:none; box-shadow:var(--shadow-lg)}
+  .cta small{opacity:0.7; font-weight:500}
+</style>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand"><span class="brand-mark">M</span><span>MECHIST <small>v0.1 · Roadside</small></span></div>
+    <div class="top-actions">
+      <span class="pill live"><span class="dot"></span> fix/bug2 live</span>
+      <span class="pill"><span style="opacity:0.6">commit</span> 84fa5b7</span>
+      <span class="pill iris">SCOPE_LOCK v1.0</span>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="hero">
+    <div class="hero-grid">
+      <div>
+        <div class="kicker"><i></i> Portal rewire · 2026-09-05 · 11 files · 58 + / 42 −</div>
+        <h1>Three logins, <em>one guard</em>,<br>all icons live.</h1>
+        <p class="lede">
+          Customer, mechanic and admin each had a front door — but the wiring between <strong>TopNav → /login → RequireAuth → portal</strong> was loose.
+          The customer CTA fell through to <code style="font-family:JetBrains Mono,monospace; background:var(--surface-2); border:1px solid var(--line-soft); padding:1px 6px; border-radius:6px">/request</code> even when signed in,
+          <code style="font-family:JetBrains Mono,monospace; background:var(--surface-2); border:1px solid var(--line-soft); padding:1px 6px; border-radius:6px">?next=</code> was ignored, and 11 nav/list icons rendered at 11–12 px — effectively invisible. This is the reconnect.
+        </p>
+        <div style="display:flex; gap:8px; margin-top:14px; flex-wrap:wrap">
+          <span class="pill azure"><span class="dot"></span> 6 / 6 gates green</span>
+          <span class="pill">0 small icons remaining</span>
+          <span class="pill">typecheck · build · 15 tests · lint 16/16 · functions</span>
+        </div>
+      </div>
+      <div class="hero-card">
+        <div class="hero-card-head"><span><b>Current fix</b> · staged, not yet pushed</span><span class="commit-row"><code>84fa5b7</code> <span style="color:var(--success); font-weight:700">● verified</span></span></div>
+        <div style="padding:12px; display:grid; gap:10px">
+          <div style="display:flex; gap:8px; flex-wrap:wrap">
+            <span class="chip ok">● typecheck pass</span><span class="chip ok">● build 15.4s</span><span class="chip ok">● 15/15 tests</span><span class="chip ok">● lint 16/16</span><span class="chip ok">● functions tsc</span><span class="chip">● icons 0 stray</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:11px">
+            <div style="background:var(--surface-2); border:1px solid var(--line-soft); border-radius:10px; padding:10px">
+              <div style="font-weight:700; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--fg-subtle)">Branch</div>
+              <div style="font-family:JetBrains Mono, monospace; font-weight:600; margin-top:4px">fix/bug2-customer-cancel-rules</div>
+              <div style="color:var(--fg-muted); margin-top:2px">ahead 1 · PR → <b style="color:var(--fg-app)">main</b></div>
+            </div>
+            <div style="background:var(--surface-2); border:1px solid var(--line-soft); border-radius:10px; padding:10px">
+              <div style="font-weight:700; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--fg-subtle)">Impact</div>
+              <div style="font-weight:600; margin-top:4px">3 portals + 8 icon surfaces</div>
+              <div style="color:var(--fg-muted); margin-top:2px">No SCOPE_LOCK drift</div>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px">
+            <a class="cta" href="#" onclick="document.getElementById('wiring').scrollIntoView({behavior:'smooth'}); return false;">Open wiring diagram <small>↓</small></a>
+            <a href="#" onclick="document.getElementById('gates').scrollIntoView({behavior:'smooth'}); return false;" style="display:inline-flex; align-items:center; gap:6px; padding:10px 14px; border-radius:999px; border:1px solid var(--line-soft); background:var(--surface-1); font-weight:600; font-size:13px; text-decoration:none; color:var(--fg-app)">Gates 6/6</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="wiring" class="section">
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">Wiring diagram</div>
+        <h2>Role portals — how the fix reconnects them</h2>
+        <p>Every protected route bounces through <code style="font-family:JetBrains Mono,monospace; background:var(--surface-2); padding:1px 6px; border-radius:6px; border:1px solid var(--line-soft)">RequireAuth</code>. The guard now preserves the destination in <code style="font-family:JetBrains Mono,monospace; background:var(--surface-2); padding:1px 6px; border-radius:6px; border:1px solid var(--line-soft)">?next=</code> and each login honours it safely.</p>
+      </div>
+      <div class="toggle" role="tablist" aria-label="Before / After">
+        <button id="btn-before" aria-pressed="false" onclick="setMode('before')">Before — loose</button>
+        <button id="btn-after" aria-pressed="true" onclick="setMode('after')">After — rewired</button>
+      </div>
+    </div>
+    <div class="hero-card" style="overflow:hidden">
+      <div class="diagram">
+        <div class="diagram-inner">
+          <div class="lane-label">Public surface — no auth</div>
+          <div class="nodes" style="grid-template-columns:repeat(4,1fr)">
+            <div class="node" style="cursor:default"><div class="node-top"><span class="node-icon" style="background:var(--surface-2)">⌖</span><span class="chip">/</span></div><h3>Landing</h3><p>Overview + trust. No GPS auto-request.</p></div>
+            <div class="node" style="cursor:default"><div class="node-top"><span class="node-icon azure">◎</span><span class="chip">/map</span></div><h3>Find Mechanics</h3><p>Explicit discovery. <b>Use My Location</b> on tap.</p></div>
+            <div class="node" style="cursor:default"><div class="node-top"><span class="node-icon" style="background:var(--surface-2)">◈</span><span class="chip">/how-it-works</span></div><h3>How it works</h3><p>3-step flow. No portal leakage.</p></div>
+            <div class="node" style="cursor:default; border-style:dashed"><div class="node-top"><span class="node-icon" style="background:var(--surface-2)">▦</span><span class="chip">/mechanics</span></div><h3>Directory</h3><p>Public roster. Approved only.</p></div>
+          </div>
+          <div class="lane-label">Auth hub — role selection</div>
+          <div class="nodes" style="grid-template-columns:1fr">
+            <div class="node" style="flex-direction:row; align-items:center; gap:14px; cursor:default">
+              <span class="node-icon azure" style="width:36px;height:36px">◐</span>
+              <div style="flex:1"><h3>/login — Choose how you're using MECHIST</h3><p>Three tiles: <b>Customer → /login/customer</b> · <b>Mechanic → /login/mechanic</b> · <b>Admin → /admin/login</b>. No “I am admin” toggle on public auth.</p></div>
+              <span class="chip ok">3 portals</span>
+            </div>
+          </div>
+          <div class="lane-label">Login pages — the fix</div>
+          <div class="nodes" id="login-nodes">
+            <div class="node active" data-portal="customer" onclick="selectPortal('customer')"><div class="node-top"><span class="node-icon azure">●</span><span class="chip ok">14 px · stroke 2</span></div><h3>/login/customer</h3><p>Azure. Car icon. Forgot-password via <code style="font-family:JetBrains Mono,monospace">sendPasswordResetEmail</code>.</p><div class="route"><b>/dashboard</b> <span class="arrow">←</span> <span id="route-customer">?next= safe → /dashboard</span></div><div class="node-meta"><span class="chip">users/{uid}.role == customer</span></div></div>
+            <div class="node active aqua" data-portal="mechanic" onclick="selectPortal('mechanic')"><div class="node-top"><span class="node-icon aqua">⬢</span><span class="chip ok">14 px · stroke 2</span></div><h3>/login/mechanic</h3><p>Aqua live. Wrench icon. Verification <code style="font-family:JetBrains Mono,monospace">pending → approved</code> by admin.</p><div class="route"><b>/mechanic</b> <span class="arrow">←</span> <span>?next= safe → /mechanic</span></div><div class="node-meta"><span class="chip">users/{uid}.role == mechanic</span></div></div>
+            <div class="node active iris" data-portal="admin" onclick="selectPortal('admin')"><div class="node-top"><span class="node-icon iris">⬣</span><span class="chip ok">claim-gated</span></div><h3>/admin/login</h3><p>Iris. Gauge icon. <code style="font-family:JetBrains Mono,monospace">request.auth.token.admin == true</code> + <code style="font-family:JetBrains Mono,monospace">verifyAdminClaim()</code>.</p><div class="route"><b>/admin</b> <span class="arrow">←</span> <span>?next= safe → /admin</span></div><div class="node-meta"><span class="chip">custom claim authoritative</span></div></div>
+          </div>
+          <div class="guard" id="guard-strip">
+            <div class="guard-icon">⛨</div>
+            <div>
+              <div style="font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--fg-subtle); margin-bottom:6px">RequireAuth guard — App.tsx · single source of truth</div>
+              <pre id="guard-code"><s>// before: role === 'unknown' → return null (blank page) + no ?next=</s>
+<em>if (loading) return &lt;PortalFallback /&gt;</em>
+<em>if (!user) return &lt;Navigate to="/login?next={encodeURIComponent(path)}" /&gt;</em>
+<em>if (role === 'unknown') return &lt;PortalFallback /&gt;  // skeleton, not blank</em>
+if (requireRole &amp;&amp; role !== requireRole) → <em>homeForRole(role)</em>  // customer→/dashboard · mechanic→/mechanic · admin→/admin</pre>
+            </div>
+            <div style="display:grid; gap:8px; min-width:160px">
+              <div style="font-size:11px; font-weight:700; color:var(--fg-app)">homeForRole()</div>
+              <div style="display:grid; gap:4px; font-family:JetBrains Mono, monospace; font-size:11px">
+                <span><span style="color:var(--fg-subtle)">admin →</span> <b>/admin</b></span>
+                <span><span style="color:var(--fg-subtle)">mechanic →</span> <b>/mechanic</b></span>
+                <span><span style="color:var(--fg-subtle)">customer →</span> <b>/dashboard</b></span>
+                <span><span style="color:var(--fg-subtle)">fallback →</span> <b>/</b></span>
+              </div>
+              <span class="chip ok" style="justify-self:start">Safe: startsWith('/') && !startsWith('//')</span>
+            </div>
+          </div>
+          <div class="lane-label">Portals — lazy chunks · Suspense → PortalFallback</div>
+          <div class="nodes">
+            <div class="node" data-portal="customer" onclick="selectPortal('customer')" style="border-top:2px solid var(--azure)"><div class="node-top"><span class="node-icon azure">◉</span><span class="chip">/dashboard · /request · /track/:id · /history · /vehicles</span></div><h3>Customer portal</h3><p>Request → live track → history. Vehicles CRUD. Offline persistence.</p></div>
+            <div class="node" data-portal="mechanic" onclick="selectPortal('mechanic')" style="border-top:2px solid var(--aqua)"><div class="node-top"><span class="node-icon aqua">⬢</span><span class="chip">/mechanic · /job/:id · /history · /profile</span></div><h3>Mechanic portal</h3><p>Job queue → accept → complete. Availability toggle. Rating via admin.</p></div>
+            <div class="node" data-portal="admin" onclick="selectPortal('admin')" style="border-top:2px solid var(--iris)"><div class="node-top"><span class="node-icon iris">⬣</span><span class="chip">/admin · /requests · /mechanics · /users</span></div><h3>Control room</h3><p>Verify mechanics, assign/reassign, CSV export, diagnostics.</p></div>
+          </div>
+        </div>
+      </div>
+      <div style="padding:10px 14px; border-top:1px solid var(--line-soft); display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between; background:var(--surface-2)">
+        <span style="font-size:11px; color:var(--fg-muted)"><b style="color:var(--fg-app)">TopNav fix:</b> <code style="font-family:JetBrains Mono,monospace; background:var(--surface-1); border:1px solid var(--line-soft); padding:1px 6px; border-radius:6px">primaryCtaForRole(role, signedIn)</code> — signed-in customer now sees <b>Dashboard → /dashboard</b> instead of falling through to <b>Get assistance → /request</b>.</span>
+        <span class="chip" id="cta-chip">Dashboard when signed-in customer ✓</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <div><div class="eyebrow aqua">Icon rewire</div><h2>Disconnected → connected</h2><p>Lucide icons at 11–12 px with default stroke vanished at nav density. Every surface normalised to <b>size 14 · strokeWidth 2</b>. Grep for stray sizes is now 0.</p></div>
+      <span class="pill live"><span class="dot"></span> 0 stray small icons</span>
+    </div>
+    <div class="icon-grid">
+      <div class="file-card"><div class="file-card-head"><span class="file-name">TopNav.tsx</span><span class="file-count">14 icons</span></div><div class="swatch-row"><span class="swatch before"><i style="background:var(--surface-1); border:1px solid var(--line-soft)">·</i> 12 px</span><span style="color:var(--fg-subtle)">→</span><span class="swatch after"><i style="background:var(--azure-soft); color:var(--azure-600); border:1px solid rgba(14,165,233,0.25)">◆</i> 14 px · sw 2</span></div><p>4 public + 3 customer + 3 mechanic + 4 admin NavItems. Primary CTA chevron stays 16 px.</p></div>
+      <div class="file-card"><div class="file-card-head"><span class="file-name">MapPage.tsx</span><span class="file-count">3 icons</span></div><div class="swatch-row"><span class="swatch before">11–12 px</span><span style="color:var(--fg-subtle)">→</span><span class="swatch after">14 px · sw 2</span></div><p>List row Wrench, distance MapPin, footer Navigation. “Geoapify → OSM fallback” legible again.</p></div>
+      <div class="file-card"><div class="file-card-head"><span class="file-name">MechanicDirectory</span><span class="file-count">4 icons</span></div><div class="swatch-row"><span class="swatch before">12 px</span><span style="color:var(--fg-subtle)">→</span><span class="swatch after">14 px · sw 2</span></div><p>MapPin ×2, Wrench, Star. Card meta (km / address / experience) now scans.</p></div>
+      <div class="file-card"><div class="file-card-head"><span class="file-name">HowItWorksPage</span><span class="file-count">3 icons</span></div><div class="swatch-row"><span class="swatch before">12 px</span><span style="color:var(--fg-subtle)">→</span><span class="swatch after">14 px · sw 2</span></div><p>Eye / Clock / AlertTriangle pills. “Track at /dashboard” affordance restored.</p></div>
+      <div class="file-card"><div class="file-card-head"><span class="file-name">IntelligentMatching</span><span class="file-count">2 icons</span></div><div class="swatch-row"><span class="swatch before">12 px</span><span style="color:var(--fg-subtle)">→</span><span class="swatch after">14 px · sw 2</span></div><p>Sparkles match % + Wrench equipment list. Matching engine section.</p></div>
+      <div class="file-card"><div class="file-card-head"><span class="file-name">MechanicNetwork</span><span class="file-count">2 icons</span></div><div class="swatch-row"><span class="swatch before">12 px</span><span style="color:var(--fg-subtle)">→</span><span class="swatch after">14 px · sw 2</span></div><p>MapPin distance + Clock ETA on mechanic cards.</p></div>
+      <div class="file-card"><div class="file-card-head"><span class="file-name">LocationSection</span><span class="file-count">1 icon</span></div><div class="swatch-row"><span class="swatch before">12 px</span><span style="color:var(--fg-subtle)">→</span><span class="swatch after">14 px · sw 2</span></div><p>MapPin on location proof block.</p></div>
+      <div class="file-card"><div class="file-card-head"><span class="file-name">MechanicDashboard</span><span class="file-count">3 icons</span></div><div class="swatch-row"><span class="swatch before">11–12 px</span><span style="color:var(--fg-subtle)">→</span><span class="swatch after">14 px · sw 2</span></div><p>Offer card MapPin/Clock + Ready Check/X. Job queue legibility.</p></div>
+    </div>
+    <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; font-size:11px; color:var(--fg-muted)">
+      <span class="chip">lucide-react ^1.37.0</span><span class="chip">grep -rn "size={11|12}" src → <b style="color:var(--success)">0</b></span><span class="chip">MetricChip strokeWidth 2.2 · Badge/IconTile unchanged</span>
+      <span style="margin-left:auto; font-family:JetBrains Mono, monospace; color:var(--fg-subtle)">Pattern: <code style="background:var(--surface-2); border:1px solid var(--line-soft); padding:1px 6px; border-radius:6px">&lt;Icon size={14} strokeWidth={2} aria-hidden /&gt;</code></span>
+    </div>
+  </div>
+
+  <div id="gates" class="section">
+    <div class="section-head">
+      <div><div class="eyebrow">Verification sweep</div><h2>Batch 1–4 · six gates, all green</h2><p>Run as a single sweep after the rewire. No SCOPE_LOCK drift — landing, ProviderMap, OSM_TILES, GPS policy and <code style="font-family:JetBrains Mono,monospace; background:var(--surface-2); padding:1px 6px; border-radius:6px; border:1px solid var(--line-soft)">ml/*</code> untouched.</p></div>
+      <span class="pill live"><span class="dot"></span> 6 / 6 PASS</span>
+    </div>
+    <div class="gates">
+      <div class="gate"><span class="gate-mark">✓</span><div><h4>typecheck</h4><p>tsc -b --noEmit — no errors across portals.</p><code>tsc -b</code></div></div>
+      <div class="gate"><span class="gate-mark">✓</span><div><h4>build</h4><p>Vite 5 · 2383 modules · 15.4 s. Chunks: firebase / motion / router / leaflet.</p><code>vite build</code></div></div>
+      <div class="gate"><span class="gate-mark">✓</span><div><h4>tests</h4><p>Vitest 3 files · 15 tests passed.</p><code>npm test</code></div></div>
+      <div class="gate"><span class="gate-mark">✓</span><div><h4>lint:rules</h4><p>16 / 16 Firestore rules checks. R001 claim, R006 cancel audit, R014 validation, R015 storage, R016 inbox.</p><code>node scripts/check-rules.mjs</code></div></div>
+      <div class="gate"><span class="gate-mark">✓</span><div><h4>functions</h4><p>firebase-admin 14.3 · tsc clean.</p><code>npm --prefix functions run build</code></div></div>
+      <div class="gate"><span class="gate-mark">✓</span><div><h4>icons</h4><p>Zero remaining <code>size={11|12}</code> in src.</p><code>grep -rn "size={11|12}" src → 0</code></div></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-head">
+      <div><div class="eyebrow iris">Change record</div><h2>What changed in 84fa5b7</h2><p>11 files · 58 + · 42 −. Only nav, map list, landing pills and the three logins. No shell redesign, no map engine swap.</p></div>
+      <span class="pill">git diff --stat</span>
+    </div>
+    <div class="table-wrap">
+      <div class="table-head"><span>File</span><span>Change</span></div>
+      <table>
+        <thead><tr><th>File</th><th>Before → After</th><th style="text-align:right">Lines</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">TopNav.tsx</td><td><span class="sub">primaryCtaForRole(role)</span> → <span class="add">primaryCtaForRole(role, signedIn)</span> · 14 NavItem icons <span class="sub">12</span> → <span class="add">14 sw 2</span> · CTA: customer signed-in → Dashboard</td><td class="mono" style="text-align:right">+18 −17</td></tr>
+          <tr><td class="mono">MapPage.tsx</td><td>List + footer icons <span class="sub">11/12</span> → <span class="add">14 sw 2</span></td><td class="mono" style="text-align:right">+2 −2</td></tr>
+          <tr><td class="mono">CustomerLogin.tsx</td><td>useEffect <span class="sub">navigate('/dashboard')</span> → <span class="add">honour ?next= if safe else /dashboard</span></td><td class="mono" style="text-align:right">+8 −3</td></tr>
+          <tr><td class="mono">MechanicLogin.tsx</td><td>useEffect <span class="sub">navigate('/mechanic')</span> → <span class="add">honour ?next= if safe else /mechanic</span></td><td class="mono" style="text-align:right">+7 −3</td></tr>
+          <tr><td class="mono">AdminLogin.tsx</td><td>useEffect <span class="sub">navigate('/admin')</span> → <span class="add">honour ?next= if safe else /admin</span></td><td class="mono" style="text-align:right">+8 −2</td></tr>
+          <tr><td class="mono">HowItWorksPage.tsx</td><td>Eye / Clock / AlertTriangle <span class="sub">12</span> → <span class="add">14 sw 2</span></td><td class="mono" style="text-align:right">+3 −3</td></tr>
+          <tr><td class="mono">MechanicDirectory.tsx</td><td>MapPin ×2 / Wrench / Star <span class="sub">12</span> → <span class="add">14 sw 2</span></td><td class="mono" style="text-align:right">+4 −4</td></tr>
+          <tr><td class="mono">IntelligentMatching.tsx</td><td>Sparkles / Wrench <span class="sub">12</span> → <span class="add">14 sw 2</span></td><td class="mono" style="text-align:right">+2 −2</td></tr>
+          <tr><td class="mono">LocationSection.tsx</td><td>MapPin <span class="sub">12</span> → <span class="add">14 sw 2</span></td><td class="mono" style="text-align:right">+1 −1</td></tr>
+          <tr><td class="mono">MechanicNetwork.tsx</td><td>MapPin / Clock <span class="sub">12</span> → <span class="add">14 sw 2</span></td><td class="mono" style="text-align:right">+2 −2</td></tr>
+          <tr><td class="mono">MechanicDashboard.tsx</td><td>MapPin / Clock / Check·X <span class="sub">11/12</span> → <span class="add">14 sw 2</span></td><td class="mono" style="text-align:right">+3 −3</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="scope" style="margin-top:10px">
+      <div class="scope-card ok"><span class="scope-icon">✓</span><div><h4>Honoured — SCOPE_LOCK v1.0 §14</h4><p>No landing/shell redesign. ProviderMap + OSM_TILES fallback untouched. No auto-GPS on <code style="font-family:JetBrains Mono,monospace">/</code> or <code style="font-family:JetBrains Mono,monospace">/map</code> mount. No continuous tracking without Track toggle. No mock mechanics.</p></div></div>
+      <div class="scope-card warn"><span class="scope-icon">○</span><div><h4>Explicitly out of scope — §12</h4><p><code style="font-family:JetBrains Mono,monospace">ml/data/* · ml/features/* · ml/scripts/* · ml/reports/*</code> and Phase 6–9 not touched. This fix stays inside auth chrome + icon wiring + safe redirect.</p></div></div>
+    </div>
+  </div>
+
+  <footer><span>MECHIST · fix/bug2-customer-cancel-rules → main · 84fa5b7 · 11 files · 6/6 gates · 0 stray icons · SCOPE_LOCK v1.0</span><span style="display:flex; gap:8px; align-items:center"><span class="pill">next: git push → PR</span><span style="color:var(--fg-subtle)">·</span><span>#13 RoadAssistBACKUP pending (~15 m)</span></span></footer>
+</div>
+
+<script>
+  function setMode(mode){
+    const before=document.getElementById('btn-before');
+    const after=document.getElementById('btn-after');
+    const chip=document.getElementById('cta-chip');
+    const code=document.getElementById('guard-code');
+    const route=document.getElementById('route-customer');
+    const isBefore=mode==='before';
+    before.setAttribute('aria-pressed', isBefore?'true':'false');
+    after.setAttribute('aria-pressed', isBefore?'false':'true');
+    if(isBefore){
+      chip.textContent='Fell through to Get assistance → /request';
+      chip.style.background='rgba(217,119,6,0.12)'; chip.style.color='#D97706'; chip.style.borderColor='rgba(217,119,6,0.25)';
+      code.innerHTML='<s style="color:#D97706">if (!user) return &lt;Navigate to="/login" /&gt;  // ?next= lost</s>\n<s style="color:#D97706">if (role === \'unknown\') return null  // blank page flash</s>\n<s style="color:#D97706">primaryCtaForRole(role)  // customer → /request always</s>\n<s style="color:#D97706">navigate(\'/dashboard\')  // ignores ?next=</s>';
+      route.textContent='ignored → always /dashboard'; route.style.color='#D97706';
+    } else {
+      chip.textContent='Dashboard when signed-in customer ✓'; chip.style.background=''; chip.style.color=''; chip.style.borderColor='';
+      code.innerHTML='<s>// before: role === \'unknown\' → return null (blank page) + no ?next=</s>\n<em>if (loading) return &lt;PortalFallback /&gt;</em>\n<em>if (!user) return &lt;Navigate to="/login?next={encodeURIComponent(path)}" /&gt;</em>\n<em>if (role === \'unknown\') return &lt;PortalFallback /&gt;  // skeleton, not blank</em>\nif (requireRole &amp;&amp; role !== requireRole) → <em>homeForRole(role)</em>  // customer→/dashboard · mechanic→/mechanic · admin→/admin';
+      route.textContent='?next= safe → /dashboard'; route.style.color='';
+    }
+  }
+  function selectPortal(which){
+    document.querySelectorAll('[data-portal]').forEach(el=>{ el.classList.remove('active'); });
+    document.querySelectorAll('[data-portal="'+which+'"]').forEach(el=>{ el.classList.add('active'); if(which==='mechanic') el.classList.add('aqua'); if(which==='admin') el.classList.add('iris'); });
+    const loginNodes=document.querySelectorAll('#login-nodes [data-portal]');
+    loginNodes.forEach(n=>{ n.classList.remove('active'); n.classList.remove('aqua'); n.classList.remove('iris'); });
+    const target=document.querySelector('#login-nodes [data-portal="'+which+'"]');
+    if(target){ target.classList.add('active'); if(which==='mechanic') target.classList.add('aqua'); if(which==='admin') target.classList.add('iris'); }
+  }
+</script>

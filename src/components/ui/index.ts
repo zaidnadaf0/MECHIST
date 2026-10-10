@@ -11,4 +11,7 @@ export { StatusPill, type StatusPillProps } from './StatusPill';
 export { RequestTimeline, type RequestTimelineProps } from './RequestTimeline';
 export { MetricChip, type MetricChipProps, type ChipTone } from './MetricChip';
 export { AuthScreen, type AuthScreenProps } from './AuthScreen';
+export { ReceiptRow } from './Receipt';
+export { Stars } from './Stars';
+export { OpsStatCard, CountdownRing, MeterRow, type OpsTone } from './Ops';
 export { AuthAlert, PasswordField, type AuthAlertProps, type AuthAlertTone, type PasswordFieldProps } from './AuthField';

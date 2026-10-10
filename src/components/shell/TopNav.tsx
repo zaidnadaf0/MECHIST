@@ -24,7 +24,6 @@ import {
   Menu,
   Radar,
   ShieldCheck,
-  Truck,
   Users2,
   X,
   Sun,
@@ -56,30 +55,13 @@ const publicLinks: NavItem[] = [
   { to: '/#trust', label: 'Trust', icon: <ShieldCheck size={14} strokeWidth={2} aria-hidden /> },
 ];
 
-const customerLinks: NavItem[] = [
-  { to: '/dashboard', label: 'Dashboard', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
-  { to: '/vehicles', label: 'Vehicles', icon: <Truck size={14} strokeWidth={2} aria-hidden /> },
-  { to: '/history', label: 'History', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
-];
-
-const mechanicLinks: NavItem[] = [
-  { to: '/mechanic', label: 'Jobs', icon: <Radar size={14} strokeWidth={2} aria-hidden /> },
-  { to: '/mechanic/history', label: 'History', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
-  { to: '/mechanic/profile', label: 'Profile', icon: <ShieldCheck size={14} strokeWidth={2} aria-hidden /> },
-];
-
-const adminLinks: NavItem[] = [
-  { to: '/admin', label: 'Overview', icon: <Activity size={14} strokeWidth={2} aria-hidden /> },
-  { to: '/admin/requests', label: 'Requests', icon: <Radar size={14} strokeWidth={2} aria-hidden /> },
-  { to: '/admin/mechanics', label: 'Mechanics', icon: <Users2 size={14} strokeWidth={2} aria-hidden /> },
-  { to: '/admin/users', label: 'Users', icon: <Users2 size={14} strokeWidth={2} aria-hidden /> },
-];
-
-function linksForRole(role: AppRole | 'unknown', signedIn: boolean): NavItem[] {
-  if (!signedIn) return publicLinks;
-  if (role === 'mechanic') return mechanicLinks;
-  if (role === 'admin')    return adminLinks;
-  if (role === 'customer') return customerLinks;
+/**
+ * TopNav only mounts on PUBLIC routes (AppShell) — portal routes render
+ * PortalShell with its own sidebar instead. So the header always shows the
+ * public links, keeping login/signup reachable even when signed in.
+ * Role-specific portal links live in PortalShell, not here.
+ */
+function linksForRole(): NavItem[] {
   return publicLinks;
 }
 
@@ -102,7 +84,7 @@ export function TopNav() {
   const progress = useSpring(scrollYProgress, { stiffness: 140, damping: 26, restDelta: 0.001 });
 
   const signedIn = Boolean(user);
-  const links = linksForRole(role, signedIn);
+  const links = linksForRole();
   const primaryCta = primaryCtaForRole(role, signedIn);
 
   useEffect(() => {
@@ -125,11 +107,11 @@ export function TopNav() {
       )}
     >
       <div className="container flex h-16 items-center justify-between gap-4">
-        <Link to="/" className="group flex items-center gap-2.5" aria-label="MECHIST home">
+        <Link to="/" className="group flex items-center gap-2.5" aria-label="RoadAssisst home">
           <span className="relative grid h-9 w-9 place-items-center overflow-hidden rounded-lg ring-1 ring-inset ring-line-soft">
             <LogoMark className="h-full w-full" />
           </span>
-          <span className="display text-h3 font-bold tracking-[-0.03em] text-fg-app">MECHIST</span>
+          <span className="display text-h3 font-bold tracking-[-0.03em] text-fg-app">ROADASSISST</span>
           <Badge tone="neutral" size="sm" className="hidden md:inline-flex">v0.1</Badge>
         </Link>
 

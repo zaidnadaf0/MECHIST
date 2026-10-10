@@ -86,7 +86,7 @@ export function HowItWorks() {
       <FadeIn>
         <SectionHeading
           hue="azure"
-          eyebrow={<><span aria-hidden>·</span> How MECHIST works · 6-step recovery</>}
+          eyebrow={<><span aria-hidden>·</span> How RoadAssisst works · 6-step recovery</>}
           title={<>Six steps. <span className="text-gradient-signal">One calm interface.</span></>}
           description="From a flat tyre to a finished invoice, the same six stages drive every request. Tap a step to inspect what happens."
           actions={

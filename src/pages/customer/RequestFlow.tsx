@@ -13,22 +13,25 @@
  * server-side by the queue.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  ArrowRight, ArrowLeft, Bike, Car, Check, MapPin, Search, Star, Truck, Wrench,
+  ArrowRight, ArrowLeft, Bike, Car, Check, MapPin, Search, Truck, Wrench,
 } from 'lucide-react';
 import {
-  Avatar, Button, Card, IconTile, SectionShell, StatusPill, Textarea, useToast,
+  Avatar, Button, Card, IconTile, ReceiptRow, SectionShell, Stars, StatusPill, Textarea, useToast,
 } from '@/components/ui';
-import { EmptyState, ErrorState, Skeleton } from '@/components/feedback';
+import { EmptyState, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import { useGeolocation, type GeoState } from '@/lib/geolocation';
 import { ProviderMap } from '@/components/map/ProviderMap';
-import { listVehicles, createRequest, type Vehicle } from '@/lib/customer';
+import { listVehicles, createRequest, OFFER_WINDOW_MS, type Vehicle } from '@/lib/customer';
 import { listAllPublicMechanics } from '@/lib/public';
 import type { MechanicProfile } from '@/lib/mechanic';
-import { nearbyMechanics, DISPATCH_RADIUS_KM, type NearbyMechanic } from '@/lib/nearby';
+import { nearbyMechanics, problemCompatibility, DISPATCH_RADIUS_KM, type NearbyMechanic } from '@/lib/nearby';
+import { rankMechanics, urgencyForCategory, vehicleMatchFor, type RankCandidate } from '@/lib/mlRank';
+import { formatDurationLong, formatDurationShort, money } from '@/lib/format';
+import { serviceById } from '@/lib/services';
 
 type Step = 1 | 2 | 3 | 4 | 5;
 
@@ -40,8 +43,8 @@ const STEPS: { n: Step; title: string; hint: string; hue: 'azure' | 'aqua' | 'ir
   { n: 5, title: 'Confirm',  hint: 'Review and submit',                    hue: 'gold' },
 ];
 
-/** Server-authoritative offer window: a mechanic has this long to accept. */
-const OFFER_WINDOW_MS = 120_000;
+/** Offer window is server-authoritative — canonical OFFER_WINDOW_MS from `@/lib/customer`
+ *  (120_000 ms = 2 minutes). Copy below derives from it so the unit can't drift. */
 
 function vehicleIcon(type: Vehicle['type']) {
   switch (type) {
@@ -56,6 +59,7 @@ function vehicleIcon(type: Vehicle['type']) {
 export function RequestFlow() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const toast = useToast();
   const [step, setStep] = useState<Step>(1);
   const [vehicles, setVehicles] = useState<Vehicle[] | null>(null);
@@ -67,6 +71,21 @@ export function RequestFlow() {
   const [pickedMechanic, setPickedMechanic] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Deep links: /request?service=towing|battery|tire|fuel|lockout|winch
+  // and /request?mechanic=<uid> (from Services catalogue / directory).
+  useEffect(() => {
+    const svc = searchParams.get('service');
+    if (svc) {
+      const map: Record<string, string> = { towing: 'tow', winch: 'tow', battery: 'battery', tire: 'flat-tyre', fuel: 'other', lockout: 'other' };
+      const cat = map[svc] ?? 'other';
+      setProblemCategory(cat);
+      setProblemText((prev) => prev || `${svc} assistance needed. `);
+    }
+    const mech = searchParams.get('mechanic');
+    if (mech) setPickedMechanic(mech);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
@@ -88,7 +107,7 @@ export function RequestFlow() {
     return () => { cancelled = true; };
   }, [step, mechanics]);
 
-  const candidates: NearbyMechanic[] = useMemo(() => {
+  const rawCandidates: NearbyMechanic[] = useMemo(() => {
     if (!geo.coords || !mechanics) return [];
     return nearbyMechanics(
       { lat: geo.coords.lat, lng: geo.coords.lng },
@@ -97,6 +116,38 @@ export function RequestFlow() {
       { radiusKm: DISPATCH_RADIUS_KM },
     );
   }, [geo.coords, problemCategory, mechanics]);
+
+  const [rankedCandidates, setRankedCandidates] = useState<NearbyMechanic[] | null>(null);
+  // ML ranking (with baseline fallback) — runs when raw list or context changes
+  useEffect(() => {
+    if (rawCandidates.length <= 1) { setRankedCandidates(rawCandidates); return; }
+    if (!geo.coords) { setRankedCandidates(rawCandidates); return; }
+    let cancelled = false;
+    const vehicle = vehicles?.find(v => v.id === vehicleId);
+    const vt = vehicle?.type === 'car' ? 'Sedan' : vehicle?.type === 'bike' ? 'Motorbike / Scooter' : 'Sedan';
+    const toRank: RankCandidate[] = rawCandidates.map(c => ({
+      mechanic: c.mechanic,
+      distanceKm: c.distanceKm,
+      etaMin: c.etaMin,
+      specialtyMatch: problemCompatibility(problemCategory, c.mechanic.specialties) ? 1 : 0,
+      vehicleMatch: vehicleMatchFor(vehicle?.type, c.mechanic.vehicleTypes),
+      withinRadius: c.distanceKm <= (c.mechanic.serviceRadiusKm ?? DISPATCH_RADIUS_KM) ? 1 : 0,
+    }));
+    rankMechanics(toRank, { lat: geo.coords.lat, lng: geo.coords.lng }, problemCategory, vt, urgencyForCategory(problemCategory)).then(ranked => {
+      if (cancelled) return;
+      const order = new Map(ranked.map(r => [r.mechanic.id, r]));
+      setRankedCandidates(rawCandidates.slice().sort((a,b) => {
+        const ra = order.get(a.mechanic.id); const rb = order.get(b.mechanic.id);
+        if (!ra || !rb) return 0;
+        // preserve ML order
+        const ia = ranked.findIndex(r => r.mechanic.id === a.mechanic.id);
+        const ib = ranked.findIndex(r => r.mechanic.id === b.mechanic.id);
+        return ia - ib;
+      }));
+    });
+    return () => { cancelled = true; };
+  }, [rawCandidates, geo.coords, problemCategory, vehicles, vehicleId]);
+  const candidates = rankedCandidates ?? rawCandidates;
 
   if (!user) return null;
 
@@ -205,6 +256,7 @@ export function RequestFlow() {
                   <StepConfirm
                     vehicles={vehicles}
                     vehicleId={vehicleId}
+                    serviceId={searchParams.get('service')}
                     problemCategory={problemCategory}
                     problemText={problemText}
                     geo={geo}
@@ -373,46 +425,119 @@ function StepLocation({ geo, requestGeo }: {
   geo: GeoState;
   requestGeo: () => void;
 }) {
-  if (geo.status === 'idle' || geo.status === 'requesting') {
-    return (
-      <div className="flex flex-col gap-3">
-        <p className="text-small text-fg-muted">
-          We need your location to find mechanics nearby. Your fix is shared with the mechanic only after they accept. <span className="text-fg-subtle">Tip: allow browser location on this step for the best match.</span>
-        </p>
-        <div>
-          <Button variant="primary" onClick={requestGeo} loading={geo.status === 'requesting'}>
-            Use my location
-          </Button>
+  return (
+    <div className="flex flex-col gap-3">
+      <GeoBanner geo={geo} requestGeo={requestGeo} />
+      {geo.status === 'idle' && (
+        <>
+          <p className="text-small text-fg-muted">
+            We need your location to find mechanics nearby. Your fix is shared with the mechanic only after they accept. <span className="text-fg-subtle">Tip: allow browser location on this step for the best match.</span>
+          </p>
+          <div>
+            <Button variant="primary" onClick={requestGeo}>
+              Use my location
+            </Button>
+          </div>
+          <p className="text-xs text-fg-subtle">Safety: if you are on a road, move to a safe spot and turn on hazard lights before sharing location.</p>
+        </>
+      )}
+      {geo.status === 'requesting' && (
+        <div className="grid gap-2" aria-hidden>
+          <Skeleton className="h-12" />
+          <Skeleton className="h-40" />
         </div>
-        <p className="text-xs text-fg-subtle">Safety: if you are on a road, move to a safe spot and turn on hazard lights before sharing location.</p>
+      )}
+      {geo.status === 'denied' && (
+        <>
+          <p className="text-small text-fg-muted">
+            Location is blocked for this site. Open your browser's site settings (lock icon in the
+            address bar), set Location to Allow, then try again — no coordinates are stored until you do.
+          </p>
+          <div>
+            <Button variant="primary" onClick={requestGeo}>
+              Try again
+            </Button>
+          </div>
+        </>
+      )}
+      {(geo.status === 'unavailable' || geo.status === 'error') && (
+        <>
+          <p className="text-small text-fg-muted">
+            {geo.status === 'unavailable'
+              ? 'Geolocation is not available in this browser. Try a different browser or device — we never guess your position.'
+              : `We couldn't get a GPS fix${geo.error ? `: ${geo.error}` : ''}. Move somewhere with a clearer sky view and retry.`}
+          </p>
+          <div>
+            <Button variant="primary" onClick={requestGeo}>
+              Retry location
+            </Button>
+          </div>
+        </>
+      )}
+      {geo.status === 'granted' && geo.coords && (
+        <>
+          <p className="text-small text-fg-muted">
+            {geo.coords.lat.toFixed(5)}, {geo.coords.lng.toFixed(5)} (±{Math.round(geo.coords.accuracy)} m)
+          </p>
+          <p className="text-xs text-fg-subtle">Distance and ETA on the next step are straight-line estimates, not road routing.</p>
+          <div className="overflow-hidden rounded-xl border border-line-soft">
+            <ProviderMap
+              center={[geo.coords.lat, geo.coords.lng]}
+              zoom={15}
+              className="aspect-[16/9] w-full"
+              userPosition={[geo.coords.lat, geo.coords.lng]}
+              userLabel="You"
+            />
+          </div>
+          <div>
+            <Button variant="ghost" size="sm" onClick={requestGeo}>
+              Refresh location
+            </Button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Persistent location-status banner. The same `geo` state that gates
+ * step 4 and feeds `createRequest({customerLat, customerLng})` drives
+ * this banner, so what the customer sees is exactly what gets submitted.
+ */
+function GeoBanner({ geo, requestGeo }: { geo: GeoState; requestGeo: () => void }) {
+  if (geo.status === 'idle') {
+    return (
+      <div role="status" className="flex items-center justify-between gap-3 rounded-lg border border-line-soft bg-surface-1 p-3">
+        <span className="text-small text-fg-muted">Location needed to find mechanics nearby.</span>
+        <Button variant="secondary" size="sm" onClick={requestGeo}>Use my location</Button>
       </div>
     );
   }
-  if (geo.status === 'denied') {
-    return <ErrorState kind="permission" retryLabel="Try again" onRetry={requestGeo} />;
+  if (geo.status === 'requesting') {
+    return (
+      <div role="status" className="flex items-center gap-3 rounded-lg border border-azure-500/30 bg-azure-500/10 p-3">
+        <span aria-hidden className="grid h-2 w-2 animate-pulse-dot rounded-full bg-azure-500" />
+        <span className="text-small text-fg-app">Requesting your location… approve the browser prompt.</span>
+      </div>
+    );
   }
-  if (geo.status === 'unavailable' || geo.status === 'error') {
-    return <ErrorState kind="gps" onRetry={requestGeo} />;
+  if (geo.status === 'granted' && geo.coords) {
+    return (
+      <div role="status" className="flex items-center justify-between gap-3 rounded-lg border border-success-500/30 bg-success-500/10 p-3">
+        <span className="flex items-center gap-2 text-small text-fg-app">
+          <span aria-hidden className="grid h-2 w-2 rounded-full bg-success-500" />
+          Location locked · ±{Math.round(geo.coords.accuracy)} m
+        </span>
+        <Button variant="ghost" size="sm" onClick={requestGeo}>Refresh</Button>
+      </div>
+    );
   }
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center gap-2">
-        <span aria-hidden className="grid h-2 w-2 rounded-full bg-success-500" />
-        <span className="eyebrow text-success-700 dark:text-success-300">Location confirmed · map uses Geoapify when configured, otherwise OpenStreetMap</span>
-      </div>
-      <p className="text-small text-fg-muted">
-        {geo.coords?.lat.toFixed(5)}, {geo.coords?.lng.toFixed(5)} (±{Math.round(geo.coords?.accuracy ?? 0)} m)
-      </p>
-      <p className="text-xs text-fg-subtle">Distance and ETA on the next step are straight-line estimates, not road routing.</p>
-      <div className="overflow-hidden rounded-xl border border-line-soft">
-        <ProviderMap
-          center={[geo.coords!.lat, geo.coords!.lng]}
-          zoom={15}
-          className="aspect-[16/9] w-full"
-          userPosition={[geo.coords!.lat, geo.coords!.lng]}
-          userLabel="You"
-        />
-      </div>
+    <div role="alert" className="rounded-lg border border-warning-500/30 bg-warning-500/10 p-3 text-small text-fg-app">
+      {geo.status === 'denied'
+        ? 'Location permission was denied — nothing was recorded.'
+        : 'Location is unavailable — nothing was recorded.'}
     </div>
   );
 }
@@ -478,8 +603,8 @@ function StepMechanic({
                   <div className="text-xs text-fg-muted">ETA {c.etaMin} min</div>
                 </div>
                 {typeof c.mechanic.rating === 'number' && (
-                  <div className="hidden items-center gap-1 sm:flex">
-                    <Star className="h-3.5 w-3.5 text-gold-400" />
+                  <div className="hidden items-center gap-1.5 sm:flex">
+                    <Stars value={c.mechanic.rating} size="xs" />
                     <span className="font-mono text-small text-fg-app">{c.mechanic.rating.toFixed(1)}</span>
                   </div>
                 )}
@@ -498,17 +623,18 @@ function StepMechanic({
         })}
       </ul>
       <p className="text-xs text-fg-subtle">
-        Offers expire {Math.round(OFFER_WINDOW_MS / 60_000)} minutes after you submit, so the mechanic can stay responsive.
+        Offers expire {formatDurationLong(OFFER_WINDOW_MS)} after you submit, so the mechanic can stay responsive.
       </p>
     </div>
   );
 }
 
 function StepConfirm({
-  vehicles, vehicleId, problemCategory, problemText, geo, pickedCandidate, error, submitting, onSubmit,
+  vehicles, vehicleId, serviceId, problemCategory, problemText, geo, pickedCandidate, error, submitting, onSubmit,
 }: {
   vehicles: Vehicle[] | null;
   vehicleId: string;
+  serviceId: string | null;
   problemCategory: string;
   problemText: string;
   geo: GeoState;
@@ -518,29 +644,49 @@ function StepConfirm({
   onSubmit: () => void;
 }) {
   const veh = vehicles?.find((v) => v.id === vehicleId);
+  // Catalogue starting-estimate only — honestly labelled, same copy as the
+  // Services page. No platform fees are invented: the final amount is set
+  // by the mechanic on completion and appears on the receipt.
+  const service = serviceById(serviceId);
   return (
     <div className="flex flex-col gap-4">
+      <div className="eyebrow">Request receipt</div>
       <dl className="grid gap-3 text-small">
-        <Row
+        <ReceiptRow
+          label="Service"
+          value={service ? service.name : problemCategory}
+          icon={<Wrench className="h-3.5 w-3.5 text-fg-muted" />}
+        />
+        <ReceiptRow
           label="Vehicle"
-          value={veh ? `${veh.year} ${veh.make} ${veh.model} — ${veh.plate}` : '—'}
+          value={veh ? `${veh.year} ${veh.make} ${veh.model} — ${veh.plate}` : null}
           icon={<Car className="h-3.5 w-3.5 text-fg-muted" />}
         />
-        <Row label="Category" value={problemCategory} icon={<Wrench className="h-3.5 w-3.5 text-fg-muted" />} />
-        <Row label="Problem" value={problemText || '—'} icon={<Search className="h-3.5 w-3.5 text-fg-muted" />} />
-        <Row
+        <ReceiptRow label="Problem" value={problemText || null} icon={<Search className="h-3.5 w-3.5 text-fg-muted" />} />
+        <ReceiptRow
           label="Location"
-          value={geo.coords ? `${geo.coords.lat.toFixed(5)}, ${geo.coords.lng.toFixed(5)}` : '—'}
+          value={geo.coords ? `${geo.coords.lat.toFixed(5)}, ${geo.coords.lng.toFixed(5)} (±${Math.round(geo.coords.accuracy)} m)` : null}
           icon={<MapPin className="h-3.5 w-3.5 text-fg-muted" />}
         />
-        <Row
+        <ReceiptRow
           label="Mechanic"
           value={pickedCandidate
-            ? `${pickedCandidate.mechanic.name} (${pickedCandidate.distanceKm.toFixed(1)} km · ETA ${pickedCandidate.etaMin} min)`
+            ? `${pickedCandidate.mechanic.name} (${pickedCandidate.distanceKm.toFixed(1)} km · ETA ${pickedCandidate.etaMin} min straight-line)`
             : 'Best available (queued)'}
           icon={<Wrench className="h-3.5 w-3.5 text-fg-muted" />}
         />
+        {service && (
+          <ReceiptRow
+            label="Starting estimate"
+            value={`${money(service.basePriceInr)} onwards`}
+          />
+        )}
       </dl>
+      <p className="text-xs text-fg-subtle">
+        {service
+          ? `Starting estimate from the service catalogue. The final amount is confirmed by the mechanic on completion — no hidden fees are added here.`
+          : `The final amount is confirmed by the mechanic on completion and appears on your receipt.`}
+      </p>
 
       {error && (
         <p role="alert" className="rounded-lg border border-danger-500/30 bg-danger-500/10 p-3 text-small text-danger-700 dark:text-danger-300">
@@ -552,7 +698,7 @@ function StepConfirm({
         <div>
           <div className="eyebrow">Offer window</div>
           <div className="mt-1 text-small text-fg-muted">
-            {Math.round(OFFER_WINDOW_MS / 60_000)} min for the mechanic to accept.
+            {formatDurationShort(OFFER_WINDOW_MS)} for the mechanic to accept.
           </div>
         </div>
         <StatusPill status="requested" size="sm" />
@@ -569,7 +715,7 @@ function StepConfirm({
         Send request
       </Button>
       <p className="text-center text-xs text-fg-subtle">
-        You can cancel from the tracking page any time before the mechanic accepts.
+        You can cancel free of charge from the tracking page while the job is still cancellable.
       </p>
     </div>
   );
@@ -607,16 +753,4 @@ function StepIcon({ step }: { step: Step }) {
     case 4: return <Search className="h-5 w-5" />;
     case 5: return <Check className="h-5 w-5" />;
   }
-}
-
-function Row({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4 border-b border-line-soft pb-2 last:border-b-0 last:pb-0">
-      <dt className="flex items-center gap-2 text-fg-muted">
-        {icon}
-        {label}
-      </dt>
-      <dd className="text-fg-app text-right max-w-[60%] truncate">{value}</dd>
-    </div>
-  );
 }

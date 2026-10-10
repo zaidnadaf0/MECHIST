@@ -1,4 +1,4 @@
-﻿rules_version = '2';
+rules_version = '2';
 // Firestore security rules for MECHIST.
 //
 // Trust model:
@@ -58,10 +58,17 @@ service cloud.firestore {
       // A user can create their own doc. The doc must declare a role,
       // and the role must be one of the public-facing roles. Admin
       // accounts cannot be self-issued from the client.
+      // P0-1B: explicit key allowlist + shape checks so signup cannot
+      // inject arbitrary fields (matches createCustomerUserDoc /
+      // createMechanicUserDocs payloads exactly).
       allow create: if isSelf(uid)
         && request.resource.data.role in ['customer', 'mechanic']
         // Sensible shape: only the keys we expect.
-        && request.resource.data.keys().hasAll(['role', 'email'])
+        && request.resource.data.keys().hasOnly(['uid', 'role', 'fullName', 'email', 'phone', 'createdAt', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.fullName is string
+        && request.resource.data.email is string
+        && (request.resource.data.phone == null || request.resource.data.phone is string)
         // No password-like fields are ever allowed in user docs.
         && !('password' in request.resource.data)
         && !('passwordHash' in request.resource.data);
@@ -69,9 +76,14 @@ service cloud.firestore {
       // A user can update their own doc, but cannot promote themselves
       // to admin and cannot flip the `approved` flag (mechanics cannot
       // self-approve either; that gate lives on /mechanics/{uid}).
+      // P0-1B: key allowlist so only Profile fields are mutable
+      // (matches Profile.tsx {fullName, phone, updatedAt}).
       allow update: if (isSelf(uid) || isClaimAdmin())
         && request.resource.data.role == resource.data.role
-        && !('approved' in request.resource.data.diff(resource.data).affectedKeys());
+        && !('approved' in request.resource.data.diff(resource.data).affectedKeys())
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['fullName', 'phone', 'updatedAt'])
+        && (!('fullName' in request.resource.data) || request.resource.data.fullName is string)
+        && (!('phone' in request.resource.data) || request.resource.data.phone == null || request.resource.data.phone is string);
 
       // Only an admin (claim) may delete.
       allow delete: if isClaimAdmin();
@@ -85,10 +97,24 @@ service cloud.firestore {
     match /vehicles/{id} {
       allow read:   if isSignedIn()
         && (resource.data.ownerId == request.auth.uid || isClaimAdmin());
+      // P0-1B: explicit shape (matches addVehicle payload) so clients
+      // cannot inject arbitrary fields.
       allow create: if isSignedIn()
         && request.resource.data.ownerId == request.auth.uid
-        && isCustomer();
-      allow update, delete: if isSignedIn()
+        && isCustomer()
+        && request.resource.data.keys().hasOnly(['ownerId', 'make', 'model', 'year', 'plate', 'type', 'isDefault', 'createdAt'])
+        && request.resource.data.make is string
+        && request.resource.data.model is string
+        && request.resource.data.plate is string
+        && request.resource.data.year is number
+        && request.resource.data.type in ['car', 'bike', 'van', 'truck']
+        && (!('isDefault' in request.resource.data) || request.resource.data.isDefault is bool);
+      // P0-1B: ownerId is frozen — an owner cannot transfer ownership by
+      // rewriting it (update path only; delete keeps the old check).
+      allow update: if isSignedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId;
+      allow delete: if isSignedIn()
         && resource.data.ownerId == request.auth.uid;
     }
 
@@ -108,18 +134,35 @@ service cloud.firestore {
 
       // Customers create their own requests. The `customerId` field must
       // match the caller's uid and the initial status must be 'requested'.
+      // P0-1B: explicit key allowlist + ownership proof. The client sends
+      // exactly {id,customerId,vehicleId,problemText,problemCategory?,
+      // customerLat,customerLng,pickedMechanicId?,status,offerExpiresAt,
+      // mechanicId:null,createdAt,updatedAt} (see createRequest) — anything
+      // else (mechanicId set, mechanicName/Phone, amountCents, etaMin,
+      // rating/comment, declinedBy, release/cancel fields, aggregates) is
+      // denied. vehicleId must belong to the caller.
       allow create: if isSignedIn() && isCustomer()
         && request.resource.data.customerId == request.auth.uid
         && request.resource.data.status == 'requested'
         && request.resource.data.offerExpiresAt is number
         && request.resource.data.problemText is string
         && request.resource.data.problemText.size() >= 5
+        && request.resource.data.problemText.size() <= 2000
         && request.resource.data.customerLat is number
         && request.resource.data.customerLng is number
         && request.resource.data.customerLat >= -90
         && request.resource.data.customerLat <= 90
         && request.resource.data.customerLng >= -180
-        && request.resource.data.customerLng <= 180;
+        && request.resource.data.customerLng <= 180
+        && request.resource.data.keys().hasOnly(['id', 'customerId', 'vehicleId', 'problemText', 'problemCategory',
+            'customerLat', 'customerLng', 'pickedMechanicId', 'status', 'offerExpiresAt',
+            'mechanicId', 'createdAt', 'updatedAt'])
+        && request.resource.data.vehicleId is string
+        && request.resource.data.mechanicId == null
+        && (!('problemCategory' in request.resource.data) || request.resource.data.problemCategory is string)
+        && (!('pickedMechanicId' in request.resource.data) || request.resource.data.pickedMechanicId is string)
+        && exists(/databases/$(database)/documents/vehicles/$(request.resource.data.vehicleId))
+        && get(/databases/$(database)/documents/vehicles/$(request.resource.data.vehicleId)).data.ownerId == request.auth.uid;
 
       // The customer can cancel/rate their own request. The mechanic can
       // accept a queued job (records mechanicId/mechanicName/etaMin) and
@@ -136,51 +179,125 @@ service cloud.firestore {
       // the security boundary is already here.
       allow update: if isSignedIn() && (
         // Customer cancels or rates their own request.
+        // P0-1B: minimum safe transitions — a customer may move a LIVE
+        // request to 'cancelled', or touch rating fields on an already
+        // 'completed' request without changing status. requested→completed,
+        // completed→cancelled, cancelled→completed and other forgeries are
+        // denied. cancelledBy must be 'customer'; cancellationReason bounded.
         (resource.data.customerId == request.auth.uid
           && isCustomer()
           && request.resource.data.status in ['cancelled', 'completed']
+          && ((request.resource.data.status == 'cancelled'
+               && resource.data.status in ['requested', 'accepted', 'on-the-way', 'arrived'])
+              || (request.resource.data.status == resource.data.status
+                  && resource.data.status == 'completed'))
           // cancelledAt / cancelledBy / cancellationReason are the audit
           // fields written by `cancelRequest` in src/lib/customer.ts.
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'rating', 'comment', 'ratedAt', 'updatedAt',
-                        'cancelledAt', 'cancelledBy', 'cancellationReason'])) ||
+                        'cancelledAt', 'cancelledBy', 'cancellationReason'])
+          // Rating/comment shape guard: a 1–5 number and a bounded string.
+          // The server aggregation trigger ignores out-of-range ratings, but
+          // the request doc itself must never store ★999 or an unbounded blob.
+          && (!('rating' in request.resource.data)
+              || (request.resource.data.rating is number
+                  && request.resource.data.rating >= 1
+                  && request.resource.data.rating <= 5))
+          && (!('comment' in request.resource.data)
+              || (request.resource.data.comment is string
+                  && request.resource.data.comment.size() <= 500))
+          && (!('cancelledBy' in request.resource.data)
+              || request.resource.data.cancelledBy == 'customer')
+          && (!('cancellationReason' in request.resource.data)
+              || (request.resource.data.cancellationReason is string
+                  && request.resource.data.cancellationReason.size() <= 500))) ||
         // Mechanic advances an already-assigned job, or writes live
         // coords. The mechanicId/mechanicName are frozen once set.
+        // P0-1B: rating/comment/ratedAt REMOVED — customer-only via the
+        // branch above (mechanics must not self-rate; aggregation folds
+        // customer ratings server-side). Terminal states are frozen:
+        // completed/cancelled can never be reopened or flipped.
+        // amountCents/durationMin only on 'completed'; all derived
+        // numerics are type/range-checked.
         (resource.data.mechanicId == request.auth.uid
           && isMechanic()
+          && !(resource.data.status in ['completed', 'cancelled'])
           && request.resource.data.mechanicId == resource.data.mechanicId
           && request.resource.data.mechanicName == resource.data.mechanicName
           && request.resource.data.status in
              ['accepted', 'on-the-way', 'arrived', 'service', 'completed', 'cancelled']
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'mechanicLat', 'mechanicLng', 'etaMin',
-                        'rating', 'comment', 'ratedAt', 'updatedAt',
-                        'amountCents', 'durationMin'])) ||
+                        'updatedAt', 'amountCents', 'durationMin'])
+          && (!('etaMin' in request.resource.data)
+              || (request.resource.data.etaMin is number
+                  && request.resource.data.etaMin >= 1
+                  && request.resource.data.etaMin <= 180))
+          && (!('mechanicLat' in request.resource.data)
+              || request.resource.data.mechanicLat == null
+              || (request.resource.data.mechanicLat is number
+                  && request.resource.data.mechanicLat >= -90
+                  && request.resource.data.mechanicLat <= 90))
+          && (!('mechanicLng' in request.resource.data)
+              || request.resource.data.mechanicLng == null
+              || (request.resource.data.mechanicLng is number
+                  && request.resource.data.mechanicLng >= -180
+                  && request.resource.data.mechanicLng <= 180))
+          && ((!(request.resource.data.diff(resource.data).affectedKeys().hasAny(['amountCents', 'durationMin'])))
+              || request.resource.data.status == 'completed')
+          && (!('amountCents' in request.resource.data)
+              || (request.resource.data.amountCents is number
+                  && request.resource.data.amountCents >= 0
+                  && request.resource.data.amountCents <= 1000000))
+          && (!('durationMin' in request.resource.data)
+              || (request.resource.data.durationMin is number
+                  && request.resource.data.durationMin >= 0
+                  && request.resource.data.durationMin <= 1440))) ||
         // Mechanic declines an open offer (status == 'requested', no mechanic assigned).
         // Appends their UID to declinedBy[] and updates updatedAt.
+        // P0-1B: append-only — the new array must be exactly the old array
+        // plus one entry (or a single entry when absent), must contain the
+        // caller's UID, and is capped at 50. Clearing, replacing, foreign
+        // UID injection, non-arrays and unbounded growth are denied.
+        // Residual: a repeat decliner can attach one extra UID per repeat
+        // call (unknown UIDs match no mechanic, so matching impact is nil;
+        // size cap bounds growth). Server rematch treats declinedBy as hint.
         (resource.data.status == 'requested'
           && (resource.data.mechanicId == null || resource.data.mechanicId == '')
           && isMechanicApproved()
           && request.resource.data.status == 'requested'
+          && request.resource.data.declinedBy is list
+          && request.resource.data.declinedBy.size() <= 50
+          && request.auth.uid in request.resource.data.declinedBy
+          && ((resource.data.keys().hasAll(['declinedBy']) && resource.data.declinedBy is list)
+              ? request.resource.data.declinedBy.size() == resource.data.declinedBy.size() + 1
+              : request.resource.data.declinedBy.size() == 1)
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['declinedBy', 'updatedAt'])) ||
         // Mechanic releases an accepted job back to the queue.
         // Only the assigned mechanic can do this from releasable states.
-        // Resets status to 'requested', clears mechanicId/mechanicName/mechanicLat/mechanicLng,
+        // Resets status to 'requested', clears mechanicId/mechanicName/mechanicPhone/mechanicLat/mechanicLng,
         // extends offerExpiresAt, writes releaseReason and releasedAt.
+        // P0-1B: releasedAt is a TIMESTAMP (matches releaseJob's
+        // serverTimestamp() writer — the old `is number` check rejected
+        // every legitimate release). releaseReason bounded; the fresh
+        // offer window must lie in the future.
         (resource.data.mechanicId == request.auth.uid
           && isMechanic()
           && resource.data.status in ['accepted', 'on-the-way', 'arrived', 'service']
           && request.resource.data.status == 'requested'
           && request.resource.data.mechanicId == null
           && request.resource.data.mechanicName == null
+          && request.resource.data.mechanicPhone == null
           && request.resource.data.mechanicLat == null
           && request.resource.data.mechanicLng == null
           && request.resource.data.offerExpiresAt is number
+          && request.time < request.resource.data.offerExpiresAt
           && request.resource.data.releaseReason is string
-          && request.resource.data.releasedAt is number
+          && request.resource.data.releaseReason.size() <= 500
+          && request.resource.data.releasedAt is timestamp
           && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['status', 'mechanicId', 'mechanicName', 'mechanicLat',
+              .hasOnly(['status', 'mechanicId', 'mechanicName', 'mechanicPhone', 'mechanicLat',
                         'mechanicLng', 'offerExpiresAt', 'releaseReason', 'releasedAt', 'updatedAt'])) ||
         // Mechanic records the accept transition. The previous
         // mechanicId must be null/empty (i.e. this is the first time
@@ -194,18 +311,27 @@ service cloud.firestore {
         // transaction performs the same check, but duplicating it in
         // the rules is what stops a determined client from bypassing
         // the transaction wrapper.
+        // P0-1B: approval enforced — an unapproved mechanic cannot claim
+        // even by direct Firestore write (previously isMechanic() only).
+        // mechanicName bounded; etaMin validated (derived Haversine ~1-180).
         (resource.data.status == 'requested'
           && request.resource.data.status == 'accepted'
           && (resource.data.mechanicId == null
               || resource.data.mechanicId == '')
           && request.resource.data.mechanicId == request.auth.uid
           && request.resource.data.mechanicName is string
+          && request.resource.data.mechanicName.size() >= 1
+          && request.resource.data.mechanicName.size() <= 120
           && request.resource.data.offerExpiresAt is number
           && request.time < request.resource.data.offerExpiresAt
           && request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'mechanicId', 'mechanicName',
                         'etaMin', 'updatedAt'])
-          && isMechanic()) ||
+          && (!('etaMin' in request.resource.data)
+              || (request.resource.data.etaMin is number
+                  && request.resource.data.etaMin >= 1
+                  && request.resource.data.etaMin <= 180))
+          && isMechanicApproved()) ||
         // Admin can override anything.
         isClaimAdmin()
       );
@@ -217,38 +343,144 @@ service cloud.firestore {
     // ---- mechanics/{uid} -------------------------------------------
 
     match /mechanics/{uid} {
-      // Public directory: anyone (signed-in or anonymous) can read the
-      // public mechanic roster so the `/mechanics` page works without
-      // forcing a login first. Sensitive fields (phone, email) are
-      // intentionally exposed for the MVP; production hardening should
-      // move them to a separate sub-collection with stricter rules.
-      allow read: if true;
+      // Phase 1D: the parent doc is PRIVATE operational data (exact
+      // base/live coordinates, garage address, legacy contact). Only the
+      // owner and claim-admins may read it. Customer-facing surfaces read
+      // the server-generated `publicMechanics/{uid}` projection instead —
+      // exact coordinates never reach the client.
+      allow read: if isSignedIn() && (isSelf(uid) || isClaimAdmin());
 
       // Self-create on signup. Must be one of the un-approved
-      // verification states â€” clients cannot mark themselves approved.
+      // verification states — clients cannot mark themselves approved.
+      // Contact fields are rejected here: signup writes them to
+      // `private/contact` (see createMechanicUserDocs).
+      // P0-1B: explicit shape + ranges (signup contract: radius 1–200,
+      // experience 0–60) so profiles cannot be created inflated.
       allow create: if isSelf(uid)
         && isSignedIn()
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.approved == false
         && request.resource.data.verificationStatus in ['pending', 'under_review']
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'approved', 'verificationStatus',
+            'specialties', 'vehicleTypes', 'experienceYears', 'serviceRadiusKm', 'isAvailable',
+            'vehicleDescription', 'garageName', 'garageAddress', 'baseLat', 'baseLng',
+            'createdAt', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.specialties is list
+        && request.resource.data.vehicleTypes is list
+        && request.resource.data.experienceYears is number
+        && request.resource.data.experienceYears >= 0
+        && request.resource.data.experienceYears <= 60
+        && request.resource.data.serviceRadiusKm is number
+        && request.resource.data.serviceRadiusKm >= 1
+        && request.resource.data.serviceRadiusKm <= 200
+        && request.resource.data.isAvailable is bool
+        && request.resource.data.garageName is string
+        && request.resource.data.garageAddress is string
+        && (!('vehicleDescription' in request.resource.data)
+            || request.resource.data.vehicleDescription == null
+            || request.resource.data.vehicleDescription is string)
+        && (!('baseLat' in request.resource.data)
+            || request.resource.data.baseLat == null
+            || (request.resource.data.baseLat is number
+                && request.resource.data.baseLat >= -90
+                && request.resource.data.baseLat <= 90))
+        && (!('baseLng' in request.resource.data)
+            || request.resource.data.baseLng == null
+            || (request.resource.data.baseLng is number
+                && request.resource.data.baseLng >= -180
+                && request.resource.data.baseLng <= 180))
+        && !('phone' in request.resource.data)
+        && !('email' in request.resource.data)
         && !('password' in request.resource.data)
         && !('passwordHash' in request.resource.data);
 
       // Self-update of profile fields, but:
       //   - cannot self-approve or change `verificationStatus`
       //   - cannot change `rating` / `reviewCount` (server-aggregated)
-      //   - can change `isAvailable`, `currentLat`, `currentLng`,
-      //     `locationUpdatedAt`, `baseLat`, `baseLng`
-      // Admins (claim) can update anything.
+      //   - cannot write `phone` / `email` (owner-only `private/contact`)
+      //   - P0-1B: explicit allowlist — only availability, live/base
+      //     location and the updatedAt marker are mutable, each
+      //     type/range-checked. Matches the only writers:
+      //     setAvailability + pushMechanicLocation. Everything else
+      //     (name, specialties, radius, garage, base) is admin-only.
+      // Admins (claim) can update anything (incl. legacy contact strip).
       allow update: if isSignedIn() && (
         (isSelf(uid) && isMechanic()
           && request.resource.data.approved == resource.data.approved
           && request.resource.data.verificationStatus == resource.data.verificationStatus
           && !('rating' in request.resource.data.diff(resource.data).affectedKeys())
-          && !('reviewCount' in request.resource.data.diff(resource.data).affectedKeys())) ||
+          && !('reviewCount' in request.resource.data.diff(resource.data).affectedKeys())
+          && !('phone' in request.resource.data.diff(resource.data).affectedKeys())
+          && !('email' in request.resource.data.diff(resource.data).affectedKeys())
+          && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['isAvailable', 'currentLat', 'currentLng', 'locationUpdatedAt', 'updatedAt'])
+          && (!('isAvailable' in request.resource.data) || request.resource.data.isAvailable is bool)
+          && (!('currentLat' in request.resource.data)
+              || (request.resource.data.currentLat is number
+                  && request.resource.data.currentLat >= -90
+                  && request.resource.data.currentLat <= 90))
+          && (!('currentLng' in request.resource.data)
+              || (request.resource.data.currentLng is number
+                  && request.resource.data.currentLng >= -180
+                  && request.resource.data.currentLng <= 180))
+          && (!('locationUpdatedAt' in request.resource.data) || request.resource.data.locationUpdatedAt is number)) ||
         isClaimAdmin()
       );
 
+      allow delete: if isClaimAdmin();
+
+      // ---- mechanics/{uid}/private/contact -------------------------
+      // Owner-scoped contact card {phone, email, updatedAt}. Only the
+      // owner and admins can read or write it — the public roster
+      // (`/mechanics`, MechanicDetail) never touches this path.
+      match /private/contact {
+        // P0-1B: shape-locked (matches updateMechanicContact {phone, email, updatedAt}).
+        allow read: if isSignedIn() && (isSelf(uid) || isClaimAdmin());
+        allow create, update: if isSignedIn() && (isSelf(uid) || isClaimAdmin())
+          && request.resource.data.keys().hasOnly(['phone', 'email', 'updatedAt'])
+          && (request.resource.data.phone == null || request.resource.data.phone is string)
+          && (request.resource.data.email == null || request.resource.data.email is string);
+        allow delete: if isClaimAdmin();
+      }
+    }
+
+    // ---- publicMechanics/{uid} ---------------------------------------
+    // Phase 1D: server-generated customer-safe projection of an approved
+    // mechanic. Written ONLY by trusted backend (Admin SDK bypasses rules;
+    // the claim-gate below covers manual admin writes). Clients can never
+    // create, update or delete it, so directory/map/detail content cannot
+    // be forged. Reads are public so `/mechanics` and `/map` work without
+    // forcing a login. By construction this doc contains ONLY:
+    // name, approved, isAvailable, specialties, vehicleTypes,
+    // experienceYears, serviceRadiusKm, rating, reviewCount,
+    // vehicleDescription, garageName, COARSE baseLat/baseLng (~1.1 km),
+    // updatedAt. No exact coords, no live GPS, no address, no contact.
+    match /publicMechanics/{uid} {
+      allow read: if true;
+      allow create, update: if isClaimAdmin()
+        && request.resource.data.keys().hasOnly(['name', 'approved', 'isAvailable',
+            'specialties', 'vehicleTypes', 'experienceYears', 'serviceRadiusKm',
+            'rating', 'reviewCount', 'vehicleDescription', 'garageName',
+            'baseLat', 'baseLng', 'updatedAt'])
+        && request.resource.data.name is string
+        && request.resource.data.approved == true
+        && request.resource.data.isAvailable is bool
+        && (!('baseLat' in request.resource.data)
+            || request.resource.data.baseLat == null
+            || (request.resource.data.baseLat is number
+                && request.resource.data.baseLat >= -90
+                && request.resource.data.baseLat <= 90))
+        && (!('baseLng' in request.resource.data)
+            || request.resource.data.baseLng == null
+            || (request.resource.data.baseLng is number
+                && request.resource.data.baseLng >= -180
+                && request.resource.data.baseLng <= 180))
+        && !('phone' in request.resource.data)
+        && !('email' in request.resource.data)
+        && !('garageAddress' in request.resource.data)
+        && !('currentLat' in request.resource.data)
+        && !('currentLng' in request.resource.data);
       allow delete: if isClaimAdmin();
     }
 
@@ -256,18 +488,18 @@ service cloud.firestore {
     // Owner-scoped inbox: watchNotifications/listNotificationsDetailed
     // (src/lib/notifications.ts) cap/limit 20 default/50 hard cap.
     // Schema: AppNotification {id,type,title(1-120),body?,requestId?,createdAt,read?}
-    // Verbatim instruction: Batch 2 Notification inbox notifications/{uid}/items/{id} owner-only rules
+    // P0-1B: creation is SERVER-ONLY. Client SDKs can no longer write to
+    // any inbox — Admin SDK producers (putNotification, deterministic
+    // notif_{requestId}_{event} IDs + existence check) bypass rules, so no
+    // server flow breaks. The unused client createNotification wrapper is
+    // now denied by design. Reads, read-flag updates and deletes stay owner-only.
     match /notifications/{uid}/items/{id} {
       allow read: if isSignedIn() && request.auth.uid == uid;
-      allow create: if isSignedIn()
-        && request.resource.data.title is string
-        && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 120
-        && request.resource.data.type is string
-        && request.resource.data.createdAt is number;
+      allow create: if false;
       allow update: if isSignedIn()
         && request.auth.uid == uid
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read'])
+        && request.resource.data.read is bool;
       allow delete: if isSignedIn() && request.auth.uid == uid;
     }
 

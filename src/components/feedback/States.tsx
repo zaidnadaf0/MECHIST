@@ -6,7 +6,7 @@ export type ErrorKind = 'firebase' | 'gps' | 'permission' | 'network' | 'ml' | '
 const COPY: Record<ErrorKind, { title: string; description: string }> = {
   firebase:        { title: 'Connection issue',     description: 'We could not reach our servers. Your changes are saved locally and will sync when we reconnect.' },
   gps:             { title: 'Location unavailable', description: 'We could not determine your location. You can enter it manually instead.' },
-  permission:      { title: 'Permission needed',    description: 'MECHIST needs this permission to continue. You can update your choice in browser settings.' },
+  permission:      { title: 'Permission needed',    description: 'RoadAssisst needs this permission to continue. You can update your choice in browser settings.' },
   network:         { title: 'You are offline',      description: 'Reconnect to the internet to continue. Anything you do now will be retried automatically.' },
   ml:              { title: 'Smart matching paused',description: 'Our matching service is temporarily unavailable. You can still browse mechanics nearby.' },
   api:             { title: 'Something went wrong', description: 'Our team has been notified. Please try again in a moment.' },

@@ -59,7 +59,7 @@ export function HowItWorksPage() {
               What happens when you need roadside assistance?
             </h1>
             <p className="max-w-prose text-body text-fg-muted text-pretty">
-              No wall of text — just the actual journey your request takes through MECHIST, and the parallel
+              No wall of text — just the actual journey your request takes through RoadAssisst, and the parallel
               journey your mechanic sees. Everything below maps to a real screen you can open today.
             </p>
             <div className="flex flex-wrap gap-2">
@@ -95,8 +95,8 @@ export function HowItWorksPage() {
           })}
         </div>
         <div className="mt-4 flex flex-wrap gap-2 text-xs text-fg-subtle">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-surface-2 px-2.5 py-1"><Eye size={14} strokeWidth={2} /> Track at <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/dashboard</Link></span>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-surface-2 px-2.5 py-1"><Clock size={14} strokeWidth={2} /> Live at <Link to="/mechanics" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/mechanics</Link></span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-surface-2 px-2.5 py-1"><Eye size={14} strokeWidth={2} /> Track in <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">customer portal</Link></span>
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line-soft bg-surface-2 px-2.5 py-1"><Clock size={14} strokeWidth={2} /> Live at <Link to="/mechanics" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">mechanic network</Link></span>
         </div>
       </ScrollRevealSection>
 
@@ -165,9 +165,9 @@ export function HowItWorksPage() {
             <div className="lg:col-span-2">
               <SectionHeading as="h2" size="sm" eyebrow="Tracking & completion" title="Follow the job, then archive it." />
               <ul className="mt-4 flex flex-col gap-2 text-small text-fg-muted">
-                <li className="flex gap-2"><Navigation size={14} className="mt-0.5 shrink-0 text-gold-600" /> <span>On accept you land on <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/track/:id</Link> — customer pin + mechanic pin + dashed line, mechanic GPS pushed throttled 25 m / 5 s.</span></li>
+                <li className="flex gap-2"><Navigation size={14} className="mt-0.5 shrink-0 text-gold-600" /> <span>On accept you land on <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">live tracking</Link> — customer pin + mechanic pin + dashed line, mechanic GPS pushed throttled 25 m / 5 s.</span></li>
                 <li className="flex gap-2"><Clock size={14} className="mt-0.5 shrink-0 text-gold-600" /> <span>Status moves <strong className="text-fg-app">requested → accepted → on-the-way → arrived → service → completed</strong> (cancelled is terminal). ETA is straight-line.</span></li>
-                <li className="flex gap-2"><History size={14} className="mt-0.5 shrink-0 text-gold-600" /> <span>Completed and cancelled services appear in <Link to="/history" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/history</Link> (customer) and <Link to="/mechanic/history" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/mechanic/history</Link> (mechanic).</span></li>
+                <li className="flex gap-2"><History size={14} className="mt-0.5 shrink-0 text-gold-600" /> <span>Completed and cancelled services appear in <Link to="/history" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">service history</Link> (customer) and <Link to="/mechanic/history" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">job history</Link> (mechanic).</span></li>
               </ul>
             </div>
             <div className="flex flex-col gap-2 rounded-xl border border-line-soft bg-surface-2/60 p-4">
@@ -175,10 +175,10 @@ export function HowItWorksPage() {
               <h3 className="text-h3 text-fg-app">If you are broken down</h3>
               <ol className="flex flex-col gap-1.5 text-small text-fg-muted list-decimal list-inside">
                 <li>Move to a safe spot, hazard lights on.</li>
-                <li>Open MECHIST → <Link to="/request" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">Request assistance</Link>.</li>
+                <li>Open RoadAssisst → <Link to="/request" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">Request assistance</Link>.</li>
                 <li>Pick vehicle, describe the problem, confirm location.</li>
                 <li>Submit — an offer is live for two minutes.</li>
-                <li>Track on <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">/track/:id</Link> and follow status updates.</li>
+                <li>Track in the <Link to="/dashboard" className="underline decoration-line-strong underline-offset-4 hover:text-fg-app">customer portal</Link> and follow status updates.</li>
               </ol>
               <p className="flex items-center gap-1.5 text-xs text-fg-subtle"><AlertTriangle size={14} strokeWidth={2} /> No repair instructions — stay safe and wait for the mechanic.</p>
             </div>
@@ -195,7 +195,7 @@ export function HowItWorksPage() {
           <Card><h3 className="text-h3 text-fg-app">What if I deny location?</h3><p className="mt-1.5 text-small text-fg-muted text-pretty">The location step surfaces the denied state with a retry. You cannot submit without a fix — the dispatch filter requires coordinates. Grant location and try again.</p></Card>
           <Card><h3 className="text-h3 text-fg-app">Can I cancel?</h3><p className="mt-1.5 text-small text-fg-muted text-pretty">From the tracking page or dashboard active-request card while the request is still requested/accepted. Cancelled requests appear in history.</p></Card>
           <Card><h3 className="text-h3 text-fg-app">What if nobody accepts?</h3><p className="mt-1.5 text-small text-fg-muted text-pretty">The request stays queued. Mechanics who declined are filtered via declinedBy and will not see it again. Keep tracking; availability changes throughout the day.</p></Card>
-          <Card><h3 className="text-h3 text-fg-app">Which map do I see?</h3><p className="mt-1.5 text-small text-fg-muted text-pretty">Geoapify tiles when D:\MECHIST\.env.local holds a valid VITE_GEOAPIFY_API_KEY and VITE_MAPS_PROVIDER=geoapify; otherwise Leaflet + OpenStreetMap. A Geoapify tile failure falls back to OSM for the session.</p></Card>
+          <Card><h3 className="text-h3 text-fg-app">Which map do I see?</h3><p className="mt-1.5 text-small text-fg-muted text-pretty">Street tiles with live mechanic pins. Your location is requested only when you choose it, and distance shown is a straight-line estimate.</p></Card>
         </div>
       </ScrollRevealSection>
 

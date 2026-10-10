@@ -43,7 +43,23 @@
  *  R013  catch-all {document=**} denies everything
  *  R014  requests/{id} create validates problemText >=5 and finite customerLat/Lng
  *  R015  storage.rules owner-only + image MIME + 8MB guard + firebase.json wiring
- *  R016  notifications/{uid}/items/{id} owner-scoped inbox (Batch 2 row 6)
+ *  R016  notifications/{uid}/items/{id} is server-only create (P0-1B: allow create: if false),
+ *        owner read, read-flag-bool update, owner delete
+ *  R017  mechanics/{uid}/private/contact exists with owner+admin-only read/write
+ *  R018  mechanics/{uid} create forbids phone/email in the public parent doc
+ *  R019  requests/{id} customer branch bounds rating to 1-5 and comment to <=500 chars
+ *  R020  requests/{id} accept requires isMechanicApproved() (P0-1B, no unapproved claim)
+ *  R021  mechanics/{uid} self-update uses an explicit hasOnly allowlist (P0-1B)
+ *  R022  mechanic-advance branch excludes rating/comment/ratedAt + freezes terminal states (P0-1B)
+ *  R023  amountCents is bounded numeric, non-negative, capped, completed-only (P0-1B)
+ *  R024  etaMin is bounded numeric in accept + advance branches (P0-1B)
+ *  R025  declinedBy is append-only: list, membership, exact +1 growth, cap 50 (P0-1B)
+ *  R026  release requires releasedAt timestamp + bounded reason + future offer window (P0-1B)
+ *  R027  vehicles/{id} update freezes ownerId (P0-1B)
+ *  R028  requests/{id} create uses hasOnly + vehicle ownership + mechanicId null (P0-1B)
+ *  R029  customer branch enforces safe transitions + cancelledBy customer + reason cap (P0-1B)
+ *  R030  users/{uid} update freezes role (no self-promotion, Phase 1C)
+ *  R031  isClaimAdmin() gates admin paths across collections (Phase 1C)
  */
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -314,20 +330,228 @@ function record(id, label, pass, detail) {
     hasStorageKey ? (storageOk ? null : storageDetail) : 'no storage key in firebase.json');
 }
 
-// R016 — notifications/{uid}/items/{id} owner-only inbox (Batch 2 row 6)
+// R016 — notifications/{uid}/items/{id}: server-only create (P0-1B).
+// Client SDKs must NOT write to any inbox; Admin SDK producers bypass
+// rules, so `allow create: if false` breaks nothing server-side.
 {
   const block = matchBlock('notifications/{uid}/items/{id}');
   if (!block) {
-    record('R016', 'notifications/{uid}/items/{id} owner-scoped inbox exists with read/create/update/delete',
+    record('R016', 'notifications/{uid}/items/{id} server-only inbox (create denied, owner read/update/delete)',
       false, 'match /notifications/{uid}/items/{id} block missing');
   } else {
+    const createDenied = /allow\s+create:\s*if\s*false\s*;/.test(block);
     const hasRead = /allow\s+read:\s*if[\s\S]*request\.auth\.uid\s*==\s*uid/.test(block);
-    const hasCreate = /allow\s+create:\s*if[\s\S]*title\s+is\s+string/.test(block) && /title\.size\(\)/.test(block) && /createdAt\s+is\s+number/.test(block);
-    const hasUpdate = /allow\s+update:\s*if[\s\S]*hasOnly\(\[.*read/.test(block);
-    record('R016', 'notifications/{uid}/items/{id} owner-scoped inbox exists with read/create/update/delete',
-      hasRead && hasCreate && hasUpdate,
-      `read=${hasRead} create(bounded title+createdAt)=${hasCreate} update(read-only)=${hasUpdate}`);
+    const hasUpdate = /allow\s+update:\s*if[\s\S]*hasOnly\(\[.*read/.test(block)
+      && /request\.resource\.data\.read\s+is\s+bool/.test(block);
+    const pass = createDenied && hasRead && hasUpdate;
+    record('R016', 'notifications/{uid}/items/{id} server-only inbox (create denied, owner read, read-bool update)',
+      pass,
+      `createDenied=${createDenied} read=${hasRead} update(read-bool)=${hasUpdate}`);
   }
+}
+// R017 — mechanics/{uid}/private/contact is owner + admin only (Issue 2)
+// (Nested header in the rules file is `match /private/contact`.)
+{
+  const block = matchBlock('private/contact');
+  if (!block) {
+    record('R017', 'mechanics/{uid}/private/contact exists with owner+admin-only read/write',
+      false, 'match /mechanics/{uid}/private/contact block missing');
+  } else {
+    const noPublic = !/allow\s+read:\s*if\s*true/.test(block);
+    const ownerRead = /allow\s+read:\s*if[\s\S]*isSelf\(uid\)/.test(block);
+    const adminRead = /allow\s+read:\s*if[\s\S]*isClaimAdmin\(\)/.test(block);
+    const ownerWrite = /allow\s+create,\s*update:\s*if[\s\S]*isSelf\(uid\)/.test(block);
+    const pass = noPublic && ownerRead && adminRead && ownerWrite;
+    record('R017', 'mechanics/{uid}/private/contact exists with owner+admin-only read/write',
+      pass,
+      `noPublic=${noPublic} ownerRead=${ownerRead} adminRead=${adminRead} ownerWrite=${ownerWrite}`);
+  }
+}
+
+// R018 — mechanics/{uid} parent rejects contact fields on client create (Issue 2)
+{
+  const block = matchBlock('mechanics/{uid}');
+  const start = block ? block.indexOf('allow create:') : -1;
+  const end = block ? block.indexOf('allow update:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const noPhone = /!\(\s*['"]phone['"]\s+in\s+request\.resource\.data\s*\)/.test(body);
+  const noEmail = /!\(\s*['"]email['"]\s+in\s+request\.resource\.data\s*\)/.test(body);
+  record('R018', "mechanics/{uid} create forbids phone/email in the public parent doc",
+    noPhone && noEmail,
+    `noPhone=${noPhone} noEmail=${noEmail}`);
+}
+
+// R019 - customer rating/comment shape guard (Batch 6: rating is 1-5, comment bounded)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const ratingBounded = /request\.resource\.data\.rating\s*>=\s*1[\s\S]*?request\.resource\.data\.rating\s*<=\s*5/.test(body);
+  const commentBounded = /request\.resource\.data\.comment\.size\(\)\s*<=\s*500/.test(body);
+  record('R019', "requests/{id} customer branch bounds rating 1-5 and comment <= 500 chars",
+    ratingBounded && commentBounded,
+    `rating=${ratingBounded} comment=${commentBounded}`);
+}
+
+// R020 — accept requires isMechanicApproved() (P0-1B)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const acceptStart = body.indexOf("request.resource.data.status == 'accepted'");
+  const acceptBody = acceptStart >= 0 ? body.slice(acceptStart) : '';
+  const pass = /isMechanicApproved\(\)/.test(acceptBody);
+  record('R020', 'requests/{id} accept branch requires isMechanicApproved()',
+    pass,
+    pass ? null : 'accept branch does not require isMechanicApproved()');
+}
+
+// R021 — mechanic self-update uses an explicit hasOnly allowlist (P0-1B)
+{
+  const block = matchBlock('mechanics/{uid}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /hasOnly\(\[\s*['"]isAvailable['"]\s*,\s*['"]currentLat['"]\s*,\s*['"]currentLng['"]\s*,\s*['"]locationUpdatedAt['"]\s*,\s*['"]updatedAt['"]\s*\]\)/.test(body);
+  record('R021', 'mechanics/{uid} self-update hasOnly allowlist {isAvailable,currentLat,currentLng,locationUpdatedAt,updatedAt}',
+    pass,
+    pass ? null : 'self-update allowlist shape differs');
+}
+
+// R022 — mechanic-advance excludes rating/comment/ratedAt + freezes terminal states (P0-1B)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const advStart = body.indexOf('Mechanic advances an already-assigned job');
+  const advBody = advStart >= 0 ? body.slice(advStart, advStart + 5000) : '';
+  const allowlists = [...advBody.matchAll(/hasOnly\(\[([^\]]*)\]\)/g)].map((m) => m[1]);
+  const noRating = allowlists.length > 0 && allowlists.every((k) => !/['"]rating['"]/.test(k) && !/['"]comment['"]/.test(k) && !/['"]ratedAt['"]/.test(k));
+  const terminalFreeze = /!\(resource\.data\.status\s+in\s+\[\s*'completed'\s*,\s*'cancelled'\s*\]\)/.test(advBody);
+  record('R022', 'mechanic-advance excludes rating/comment/ratedAt and freezes completed/cancelled',
+    noRating && terminalFreeze,
+    `noRatingKeys=${noRating} terminalFreeze=${terminalFreeze}`);
+}
+
+// R023 — amountCents bounded numeric, non-negative, capped, completed-only (P0-1B)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const numBounded = /request\.resource\.data\.amountCents\s+is\s+number[\s\S]*?request\.resource\.data\.amountCents\s*>=\s*0[\s\S]*?request\.resource\.data\.amountCents\s*<=\s*1000000/.test(body);
+  const completedOnly = /amountCents[\s\S]*?request\.resource\.data\.status\s*==\s*'completed'/.test(body);
+  record('R023', 'amountCents is number 0..1000000 and completed-only',
+    numBounded && completedOnly,
+    `bounded=${numBounded} completedOnly=${completedOnly}`);
+}
+
+// R024 — etaMin bounded numeric in accept + advance (P0-1B)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const bounded = /request\.resource\.data\.etaMin\s+is\s+number[\s\S]*?request\.resource\.data\.etaMin\s*>=\s*1[\s\S]*?request\.resource\.data\.etaMin\s*<=\s*180/.test(body);
+  record('R024', 'etaMin is number 1..180 where accepted',
+    bounded,
+    bounded ? null : 'no etaMin 1..180 numeric guard');
+}
+
+// R025 — declinedBy append-only: list, membership, exact +1 growth, cap 50 (P0-1B)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const isList = /request\.resource\.data\.declinedBy\s+is\s+list/.test(body);
+  const member = /request\.auth\.uid\s+in\s+request\.resource\.data\.declinedBy/.test(body);
+  const growth = /request\.resource\.data\.declinedBy\.size\(\)\s*==\s*resource\.data\.declinedBy\.size\(\)\s*\+\s*1/.test(body);
+  const cap = /request\.resource\.data\.declinedBy\.size\(\)\s*<=\s*50/.test(body);
+  const pass = isList && member && growth && cap;
+  record('R025', 'declinedBy append-only (list + membership + exact +1 growth + cap 50)',
+    pass,
+    `list=${isList} member=${member} growth=${growth} cap=${cap}`);
+}
+
+// R026 — release: releasedAt timestamp + bounded reason + future window (P0-1B)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const tsType = /request\.resource\.data\.releasedAt\s+is\s+timestamp/.test(body);
+  const reasonCap = /request\.resource\.data\.releaseReason\.size\(\)\s*<=\s*500/.test(body);
+  const futureWin = /request\.time\s*<\s*request\.resource\.data\.offerExpiresAt/.test(body);
+  record('R026', 'release requires releasedAt timestamp + reason <=500 + future offer window',
+    tsType && reasonCap && futureWin,
+    `timestamp=${tsType} reasonCap=${reasonCap} futureWin=${futureWin}`);
+}
+
+// R027 — vehicles update freezes ownerId (P0-1B)
+{
+  const block = matchBlock('vehicles/{id}');
+  const pass = /request\.resource\.data\.ownerId\s*==\s*resource\.data\.ownerId/.test(block || '');
+  record('R027', 'vehicles/{id} update freezes ownerId',
+    pass,
+    pass ? null : 'no ownerId freeze in vehicles update');
+}
+
+// R028 — request create allowlist + vehicle ownership + mechanicId null (P0-1B)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow create:') : -1;
+  const end = block ? block.indexOf('allow update:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const allowlist = /request\.resource\.data\.keys\(\)\.hasOnly\(\[/.test(body);
+  const ownership = /vehicles\/\$\(request\.resource\.data\.vehicleId\)\)\.data\.ownerId\s*==\s*request\.auth\.uid/.test(body);
+  const mechNull = /request\.resource\.data\.mechanicId\s*==\s*null/.test(body);
+  const noAmount = !/amountCents/.test(body);
+  const pass = allowlist && ownership && mechNull && noAmount;
+  record('R028', 'request create hasOnly allowlist + vehicle ownership + mechanicId null + no amountCents',
+    pass,
+    `allowlist=${allowlist} ownership=${ownership} mechNull=${mechNull} noAmount=${noAmount}`);
+}
+
+// R030 — users/{uid} update freezes role (Phase 1C: no self-promotion)
+{
+  const block = matchBlock('users/{uid}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /request\.resource\.data\.role\s*==\s*resource\.data\.role/.test(body);
+  record('R030', "users/{uid} update requires role unchanged (no self-promotion)",
+    pass,
+    pass ? null : 'no role-freeze in users/{uid} update');
+}
+
+// R031 — isClaimAdmin() gates admin paths across collections (Phase 1C)
+{
+  const uses = (src.match(/isClaimAdmin\(\)/g) || []).length;
+  // users read/update/delete, vehicles read, requests read/update/delete,
+  // mechanics update/delete/contact — at minimum 8 allow-sites.
+  const pass = uses >= 8;
+  record('R031', 'isClaimAdmin() gates admin paths (>=8 allow-sites)',
+    pass,
+    `isClaimAdmin() used ${uses}x, need >=8`);
+}
+// R029 — customer safe transitions + cancelledBy customer + reason cap (P0-1B)
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const liveCancel = /resource\.data\.status\s+in\s+\[\s*'requested'\s*,\s*'accepted'\s*,\s*'on-the-way'\s*,\s*'arrived'\s*\]/.test(body);
+  const rateOnly = /request\.resource\.data\.status\s*==\s*resource\.data\.status[\s\S]*?resource\.data\.status\s*==\s*'completed'/.test(body);
+  const byCustomer = /request\.resource\.data\.cancelledBy\s*==\s*'customer'/.test(body);
+  const reasonCap = /request\.resource\.data\.cancellationReason\.size\(\)\s*<=\s*500/.test(body);
+  const pass = liveCancel && rateOnly && byCustomer && reasonCap;
+  record('R029', 'customer cancel-from-live + rate-only-on-completed + cancelledBy customer + reason cap',
+    pass,
+    `liveCancel=${liveCancel} rateOnly=${rateOnly} byCustomer=${byCustomer} reasonCap=${reasonCap}`);
 }
 let failed = 0;
 for (const r of results) {

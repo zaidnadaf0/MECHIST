@@ -1,0 +1,1295 @@
+
+===== firebase.json =====
+{
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "functions": {
+    "source": "functions",
+    "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"],
+    "runtime": "nodejs20"
+  },
+  "emulators": {
+    "auth": { "port": 9099 },
+    "firestore": { "port": 8080 },
+    "functions": { "port": 5001 },
+    "pubsub": { "port": 8085 },
+    "storage": { "port": 9199 },
+    "ui": { "enabled": true, "port": 4000 },
+    "singleProjectMode": true
+  }
+}
+
+===== .firebaserc =====
+{
+  "projects": {
+    "default": "mechist-e0eba"
+  }
+}
+
+===== functions\src\index.ts =====
+import * as functions from 'firebase-functions';
+import * as admin from 'firebase-admin';
+import { ServiceRequest, MechanicProfile } from './types';
+import {
+  findEligibleMechanics,
+  resetRequestForRematch,
+  needsRematching,
+  OFFER_WINDOW_MS,
+  deriveEtaMinutes,
+} from './matching';
+
+admin.initializeApp();
+const db = admin.firestore();
+
+/**
+ * Triggered when a request document is written.
+ * Handles:
+ *   - Auto-rematch when a mechanic declines (declinedBy array grows)
+ *   - Auto-rematch when a mechanic releases (status back to requested, mechanicId cleared)
+ *   - Initial dispatch on create (if no pickedMechanicId)
+ */
+export const onRequestWrite = functions.firestore
+  .document('requests/{requestId}')
+  .onWrite(async (change, context) => {
+    const requestId = context.params.requestId;
+    const before = change.before.exists ? (change.before.data() as ServiceRequest) : null;
+    const after = change.after.exists ? (change.after.data() as ServiceRequest) : null;
+
+    if (!after) {
+      console.log(`[onRequestWrite] ${requestId}: Document deleted`);
+      return;
+    }
+
+    if (!before) {
+      console.log(`[onRequestWrite] ${requestId}: Document created`);
+      await handleNewRequest(requestId, after);
+      return;
+    }
+
+    const statusChanged = before.status !== after.status;
+    const mechanicCleared = before.mechanicId && !after.mechanicId;
+    const declinedByGrew =
+      after.status === 'requested' &&
+      !after.mechanicId &&
+      (after.declinedBy?.length ?? 0) > (before.declinedBy?.length ?? 0);
+
+    if ((statusChanged && after.status === 'requested' && mechanicCleared) || declinedByGrew) {
+      console.log(`[onRequestWrite] ${requestId}: Rematch triggered`, {
+        statusChanged,
+        mechanicCleared,
+        declinedByGrew,
+        beforeStatus: before.status,
+        afterStatus: after.status,
+        beforeDeclinedCount: before.declinedBy?.length ?? 0,
+        afterDeclinedCount: after.declinedBy?.length ?? 0,
+      });
+      await handleRematch(requestId, after);
+    }
+  });
+
+/** Core assignment: picks best available mechanic and writes transactionally. */
+async function assignTopCandidate(
+  requestId: string,
+  request: ServiceRequest,
+): Promise<boolean> {
+  const excludeUids = request.declinedBy ?? [];
+  const candidates = await findEligibleMechanics(db, request, excludeUids);
+  if (candidates.length === 0) {
+    console.log(`[assignTopCandidate] ${requestId}: No eligible mechanics found`);
+    return false;
+  }
+  const top = candidates[0];
+  const etaMin = deriveEtaMinutes(
+    top.mechanic.baseLat && top.mechanic.baseLng
+      ? { lat: top.mechanic.baseLat, lng: top.mechanic.baseLng }
+      : undefined,
+    request
+  );
+  const ref = db.collection('requests').doc(requestId);
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error('Request no longer exists');
+      const cur = snap.data() as ServiceRequest;
+      if (cur.status !== 'requested' || cur.mechanicId) throw new Error('already-assigned');
+      tx.update(ref, {
+        status: 'accepted',
+        mechanicId: top.mechanic.id,
+        mechanicName: top.mechanic.name,
+        etaMin,
+        updatedAt: new Date(),
+      });
+    });
+    console.log(`[assignTopCandidate] ${requestId}: Assigned to ${top.mechanic.id} (${top.mechanic.name})`);
+    return true;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg === 'already-assigned') {
+      console.log(`[assignTopCandidate] ${requestId}: Skipped — already assigned by concurrent write`);
+      return false;
+    }
+    throw err;
+  }
+}
+
+/** Handle initial dispatch for a new request. */
+async function handleNewRequest(requestId: string, request: ServiceRequest): Promise<void> {
+  if (request.pickedMechanicId) {
+    console.log(`[handleNewRequest] ${requestId}: Has pickedMechanicId, skipping auto-dispatch`);
+    return;
+  }
+  if (request.status !== 'requested' || request.mechanicId) return;
+  await assignTopCandidate(requestId, request);
+}
+
+/** Handle rematch when a job is released or declined. */
+async function handleRematch(requestId: string, request: ServiceRequest): Promise<void> {
+  if (request.status !== 'requested' || request.mechanicId) return;
+  await assignTopCandidate(requestId, request);
+}
+
+/**
+ * Scheduled function: runs every minute to find expired offers
+ * and trigger rematch for them.
+ */
+export const scheduledOfferExpiry = functions.pubsub
+  .schedule('every 1 minutes')
+  .onRun(async () => {
+    const now = Date.now();
+    const snapshot = await db
+      .collection('requests')
+      .where('status', '==', 'requested')
+      .where('offerExpiresAt', '<', now)
+      .where('mechanicId', '==', null)
+      .limit(50)
+      .get();
+
+    if (snapshot.empty) {
+      console.log('[scheduledOfferExpiry] No expired offers to process');
+      return;
+    }
+
+    console.log(`[scheduledOfferExpiry] Found ${snapshot.size} expired offers`);
+
+    for (const doc of snapshot.docs) {
+      const request = { id: doc.id, ...doc.data() } as ServiceRequest;
+      if (!needsRematching(request)) continue;
+      try {
+        await handleRematch(request.id, request);
+      } catch (err) {
+        console.error('[scheduledOfferExpiry] ' + request.id + ' rematch failed:', err);
+      }
+    }
+  });
+
+/**
+ * Scheduled function: runs every 5 minutes to clean up stale requested
+ * offers that have no mechanic and no recent activity.
+ * Marks them as cancelled after 30 minutes of no match.
+ */
+export const scheduledStaleRequestCleanup = functions.pubsub
+  .schedule('every 5 minutes')
+  .onRun(async () => {
+    const staleThreshold = Date.now() - 30 * 60 * 1000;
+
+    const snapshot = await db
+      .collection('requests')
+      .where('status', '==', 'requested')
+      .where('mechanicId', '==', null)
+      .where('updatedAt', '<', staleThreshold)
+      .limit(20)
+      .get();
+
+    if (snapshot.empty) {
+      return;
+    }
+
+    console.log(`[scheduledStaleRequestCleanup] Cancelling ${snapshot.size} stale requests`);
+
+    const batch = db.batch();
+    for (const doc of snapshot.docs) {
+      const ref = doc.ref;
+      batch.update(ref, {
+        status: 'cancelled',
+        cancellationReason: 'No mechanic available after 30 minutes',
+        cancelledAt: new Date(),
+        cancelledBy: 'system',
+        updatedAt: new Date(),
+      });
+    }
+    await batch.commit();
+  });
+
+/**
+ * Callable function: manual trigger for admin to force rematch a specific request.
+ */
+export const forceRematch = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.token.admin) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin only');
+  }
+
+  const { requestId } = data as { requestId: string };
+  if (!requestId) {
+    throw new functions.https.HttpsError('invalid-argument', 'requestId required');
+  }
+
+  const doc = await db.collection('requests').doc(requestId).get();
+  if (!doc.exists) {
+    throw new functions.https.HttpsError('not-found', 'Request not found');
+  }
+
+  const request = { id: doc.id, ...doc.data() } as ServiceRequest;
+  if (request.status !== 'requested' && !(request.status === 'accepted' || request.status === 'on-the-way' || request.status === 'arrived' || request.status === 'service')) {
+    throw new functions.https.HttpsError('failed-precondition', 'Request is not in a rematchable state');
+  }
+  // Re-read inside transaction via assign path: reset then assign atomically where possible.
+  // resetRequestForRematch does a single-field update; assignTopCandidate does a transaction with guard.
+  await resetRequestForRematch(db, requestId);
+  const freshSnap = await db.collection('requests').doc(requestId).get();
+  const fresh = { ...(freshSnap.data() as ServiceRequest), id: freshSnap.id };
+  await assignTopCandidate(requestId, fresh);
+
+  return { success: true };
+});
+
+===== functions\src\matching.ts =====
+import { Firestore, Query, DocumentSnapshot, GeoPoint } from 'firebase-admin/firestore';
+import { ServiceRequest, MechanicProfile } from './types';
+
+export const OFFER_WINDOW_MS = 120_000;
+export const MAX_CANDIDATES_PER_ROUND = 5;
+
+/** Haversine distance in km between two lat/lng points. */
+export function haversineKm(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return 6371 * c;
+}
+
+/** Derive ETA in minutes from mechanic base to request location. */
+export function deriveEtaMinutes(
+  mechanicBase: { lat: number; lng: number } | undefined,
+  request: ServiceRequest
+): number {
+  if (!mechanicBase) return request.etaMin ?? 15;
+  const km = haversineKm(
+    mechanicBase.lat,
+    mechanicBase.lng,
+    request.customerLat,
+    request.customerLng
+  );
+  if (!Number.isFinite(km) || km <= 0) return request.etaMin ?? 15;
+  return Math.max(1, Math.round((km / 35) * 60));
+}
+
+/** Score a mechanic for a request (higher = better match). */
+export function scoreMechanic(
+  mechanic: MechanicProfile,
+  request: ServiceRequest
+): number {
+  if (!mechanic.approved || !mechanic.isAvailable) return -Infinity;
+  if (!mechanic.baseLat || !mechanic.baseLng) return -Infinity;
+
+  const km = haversineKm(
+    mechanic.baseLat,
+    mechanic.baseLng,
+    request.customerLat,
+    request.customerLng
+  );
+  if (!Number.isFinite(km)) return -Infinity;
+
+  const radius = mechanic.serviceRadiusKm ?? 50;
+  if (km > radius) return -Infinity;
+
+  let score = 1000 - km * 10;
+
+  if (request.problemCategory && mechanic.specialties?.includes(request.problemCategory)) {
+    score += 200;
+  }
+
+  if (mechanic.rating != null) {
+    score += mechanic.rating * 20;
+  }
+
+  if (mechanic.reviewCount != null) {
+    score += Math.min(mechanic.reviewCount, 50) * 2;
+  }
+
+  if (mechanic.currentLat != null && mechanic.currentLng != null && mechanic.locationUpdatedAt) {
+    const ageMs = Date.now() - mechanic.locationUpdatedAt;
+    if (ageMs < 5 * 60 * 1000) {
+      const liveKm = haversineKm(
+        mechanic.currentLat,
+        mechanic.currentLng,
+        request.customerLat,
+        request.customerLng
+      );
+      if (liveKm < km) {
+        score += 100;
+      }
+    }
+  }
+
+  return score;
+}
+
+/** Find eligible mechanics for a request, sorted by score descending. */
+export async function findEligibleMechanics(
+  db: Firestore,
+  request: ServiceRequest,
+  excludeUids: string[] = []
+): Promise<Array<{ mechanic: MechanicProfile; score: number }>> {
+  const mechanicsRef = db.collection('mechanics');
+  const snapshot = await mechanicsRef
+    .where('approved', '==', true)
+    .where('isAvailable', '==', true)
+    .get();
+
+  const candidates: Array<{ mechanic: MechanicProfile; score: number }> = [];
+
+  for (const doc of snapshot.docs) {
+    const mechanic = { id: doc.id, ...doc.data() } as MechanicProfile;
+    if (excludeUids.includes(mechanic.id)) continue;
+
+    const score = scoreMechanic(mechanic, request);
+    if (score > -Infinity) {
+      candidates.push({ mechanic, score });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates.slice(0, MAX_CANDIDATES_PER_ROUND);
+}
+
+/** Extend offer window for a request and clear assignment. Uses transaction so concurrent accepts don't race a reset. */
+export async function resetRequestForRematch(
+  db: Firestore,
+  requestId: string
+): Promise<boolean> {
+  try {
+    const ref = db.collection('requests').doc(requestId);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error('Request no longer exists');
+      tx.update(ref, {
+        status: 'requested',
+        mechanicId: null,
+        mechanicName: null,
+        mechanicLat: null,
+        mechanicLng: null,
+        offerExpiresAt: Date.now() + OFFER_WINDOW_MS,
+        updatedAt: new Date(),
+      });
+    });
+    return true;
+  } catch (err) {
+    console.error(`[resetRequestForRematch] ${requestId}:`, err);
+    return false;
+  }
+}
+
+/** Check if a request needs rematching (expired or released/declined). */
+export function needsRematching(request: ServiceRequest): boolean {
+  if (request.status !== 'requested') return false;
+  if (request.mechanicId) return false;
+  if (request.offerExpiresAt != null && request.offerExpiresAt < Date.now()) return true;
+  return false;
+}
+
+===== functions\src\types.ts =====
+export interface Vehicle {
+  id: string;
+  make: string;
+  model: string;
+  year: number;
+  plate: string;
+  type: 'car' | 'bike' | 'van' | 'truck';
+}
+
+export interface ServiceRequest {
+  id: string;
+  customerId: string;
+  vehicleId: string;
+  problemText: string;
+  problemCategory?: string;
+  status: 'requested' | 'accepted' | 'on-the-way' | 'arrived' | 'service' | 'completed' | 'cancelled';
+  customerLat: number;
+  customerLng: number;
+  mechanicId?: string | null;
+  mechanicName?: string | null;
+  mechanicLat?: number | null;
+  mechanicLng?: number | null;
+  etaMin?: number;
+  pickedMechanicId?: string;
+  offerExpiresAt?: number;
+  declinedBy?: string[];
+  releaseReason?: string;
+  cancellationReason?: string;
+  rating?: number;
+  comment?: string;
+  createdAt: number;
+  updatedAt: number;
+  cancelledAt?: number;
+  cancelledBy?: string;
+  ratedAt?: number;
+  releasedAt?: number;
+}
+
+export interface MechanicProfile {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  verificationStatus?: 'pending' | 'under_review' | 'approved' | 'rejected';
+  approved: boolean;
+  specialties: string[];
+  vehicleTypes?: string[];
+  experienceYears?: number;
+  serviceRadiusKm?: number;
+  isAvailable: boolean;
+  rating?: number;
+  reviewCount?: number;
+  vehicleDescription?: string;
+  garageName?: string;
+  garageAddress?: string;
+  currentLat?: number;
+  currentLng?: number;
+  locationUpdatedAt?: number;
+  baseLat?: number;
+  baseLng?: number;
+}
+
+export interface UserProfile {
+  uid: string;
+  email: string;
+  role: 'customer' | 'mechanic' | 'admin';
+  createdAt: number;
+}
+
+===== functions\package.json =====
+{
+  "name": "mechist-functions",
+  "version": "1.0.0",
+  "description": "Cloud Functions for MECHIST - auto-rematch, offer expiry, notifications",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc -w",
+    "serve": "npm run build && firebase emulators:start --only functions",
+    "shell": "npm run build && firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+    "lint": "eslint src/**/*.ts"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "firebase-functions": "^4.8.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "firebase-functions-test": "^3.2.0",
+    "eslint": "^8.56.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0"
+  },
+  "private": true
+}
+
+===== scripts\phaseB-verify.mjs =====
+#!/usr/bin/env node
+import { strict as assert } from 'node:assert';
+function memDb(seed) {
+  const cols = new Map();
+  for (const [name, docs] of Object.entries(seed || {})) {
+    const m = new Map();
+    for (const d of docs) m.set(d.id, { ...d });
+    cols.set(name, m);
+  }
+  function col(name) {
+    if (!cols.has(name)) cols.set(name, new Map());
+    const m = cols.get(name);
+    return {
+      doc(id) {
+        return {
+          id,
+          async get() {
+            const data = m.get(id);
+            return { exists: !!data, id, data: () => (data ? { ...data } : undefined), ref: this };
+          },
+          async update(patch) {
+            const cur = m.get(id);
+            if (!cur) throw new Error('not-found');
+            m.set(id, { ...cur, ...patch });
+          },
+          async set(data) { m.set(id, { ...data, id }); },
+        };
+      },
+      where(field, op, value) {
+        const filters = [{ field, op, value }];
+        const q = {
+          where(f2, op2, v2) { filters.push({ field: f2, op: op2, value: v2 }); return q; },
+          limit(n) { q._limit = n; return q; },
+          async get() {
+            let out = [...m.values()];
+            for (const f of filters) {
+              if (f.op === '==') out = out.filter((d) => d[f.field] === f.value);
+              else if (f.op === '<') out = out.filter((d) => d[f.field] != null && d[f.field] < f.value);
+              else throw new Error('unsupported op ' + f.op);
+            }
+            if (q._limit != null) out = out.slice(0, q._limit);
+            const docs = out.map((d) => ({ id: d.id, data: () => ({ ...d }), ref: col(name).doc(d.id) }));
+            return { empty: docs.length === 0, size: docs.length, docs };
+          },
+        };
+        return q;
+      },
+      async get() {
+        const docs = [...m.values()].map((d) => ({ id: d.id, data: () => ({ ...d }), ref: col(name).doc(d.id) }));
+        return { empty: docs.length === 0, size: docs.length, docs };
+      },
+    };
+  }
+  return {
+    collection: col,
+    batch() {
+      const ops = [];
+      return { update(ref, patch) { ops.push([ref, patch]); }, async commit() { for (const [ref, patch] of ops) await ref.update(patch); } };
+    },
+    async runTransaction(fn) {
+      const tx = { async get(ref) { return ref.get(); }, update(ref, patch) { return ref.update(patch); } };
+      return fn(tx);
+    },
+  };
+}
+async function loadMatching() {
+  const mod = await import('../functions/lib/matching.js');
+  return mod;
+}
+function req(overrides = {}) {
+  return {
+    id: 'req-1', customerId: 'cust-1', vehicleId: 'veh-1',
+    problemText: 'flat tyre', problemCategory: 'tyre',
+    status: 'requested', customerLat: 12.9716, customerLng: 77.5946,
+    mechanicId: null, mechanicName: null,
+    createdAt: Date.now(), updatedAt: Date.now(),
+    offerExpiresAt: Date.now() + 120000, declinedBy: [], ...overrides,
+  };
+}
+function mech(id, overrides = {}) {
+  return {
+    id, name: 'M-' + id, approved: true, isAvailable: true,
+    specialties: ['tyre'], baseLat: 12.9716, baseLng: 77.5946,
+    serviceRadiusKm: 50, rating: 4.5, reviewCount: 10, ...overrides,
+  };
+}
+async function runUnit() {
+  const { findEligibleMechanics, needsRematching, resetRequestForRematch, deriveEtaMinutes, scoreMechanic } = await loadMatching();
+  const failures = [];
+  async function check(name, fn) {
+    try { await fn(); console.log('OK  ', name); } catch (e) { failures.push(name); console.error('FAIL', name, e && e.message ? e.message : e); if (e && e.stack) console.error(e.stack); }
+  }
+  await check('new request picks top candidate', async () => {
+    const db = memDb({ mechanics: [mech('m1', { rating: 5 }), mech('m2', { rating: 3 })], requests: [req()] });
+    const cands = await findEligibleMechanics(db, req(), []);
+    assert.ok(cands.length >= 2); assert.equal(cands[0].mechanic.id, 'm1');
+  });
+  await check('decline excludes declinedBy from next round', async () => {
+    const db = memDb({ mechanics: [mech('m1'), mech('m2')], requests: [] });
+    const r = req({ declinedBy: ['m1'] });
+    const cands = await findEligibleMechanics(db, r, r.declinedBy);
+    assert.ok(cands.every((c) => c.mechanic.id !== 'm1')); assert.equal(cands[0].mechanic.id, 'm2');
+  });
+  await check('offer expiry needsRematching only when requested unassigned expired', async () => {
+    assert.equal(needsRematching(req({ status: 'requested', mechanicId: null, offerExpiresAt: Date.now() - 1000 })), true);
+    assert.equal(needsRematching(req({ status: 'accepted', mechanicId: 'm1', offerExpiresAt: Date.now() - 1000 })), false);
+    assert.equal(needsRematching(req({ status: 'requested', mechanicId: null, offerExpiresAt: Date.now() + 100000 })), false);
+    assert.equal(needsRematching(req({ status: 'requested', mechanicId: 'm1', offerExpiresAt: Date.now() - 1000 })), false);
+  });
+  await check('stale resetRequestForRematch clears assignment and extends window', async () => {
+    const db = memDb({ requests: [{ id: 'req-1', status: 'accepted', mechanicId: 'm1', mechanicName: 'M-m1', mechanicLat: 1, mechanicLng: 1, offerExpiresAt: 1, updatedAt: Date.now() - 40*60*1000 }] });
+    const ok = await resetRequestForRematch(db, 'req-1'); assert.equal(ok, true);
+    const cur = (await db.collection('requests').doc('req-1').get()).data();
+    assert.equal(cur.status, 'requested'); assert.equal(cur.mechanicId, null); assert.ok(cur.offerExpiresAt > Date.now());
+  });
+  await check('release back to queue next rematch finds candidates', async () => {
+    const db = memDb({ mechanics: [mech('m1'), mech('m2')], requests: [req({ status: 'accepted', mechanicId: 'm1', mechanicName: 'M-m1' })] });
+    await resetRequestForRematch(db, 'req-1');
+    const cur = (await db.collection('requests').doc('req-1').get()).data();
+    assert.equal(cur.status, 'requested'); assert.equal(cur.mechanicId, null);
+    const cands = await findEligibleMechanics(db, { ...req(), ...cur, id: 'req-1' }, []);
+    assert.ok(cands.length > 0);
+  });
+  await check('no duplicate assignment second assign sees already-assigned', async () => {
+    const db = memDb({ mechanics: [mech('m1'), mech('m2')], requests: [req()] });
+    const r = req();
+    const cands = await findEligibleMechanics(db, r, []);
+    await db.collection('requests').doc('req-1').update({ status: 'accepted', mechanicId: cands[0].mechanic.id, mechanicName: cands[0].mechanic.name });
+    const cur = (await db.collection('requests').doc('req-1').get()).data();
+    assert.equal(cur.status, 'accepted'); assert.ok(cur.mechanicId);
+    assert.equal(needsRematching({ ...r, ...cur }), false);
+  });
+  await check('forceRematch guard non-rematchable completed rejected', async () => {
+    function isRematchable(s) { return s.status === 'requested' || ['accepted','on-the-way','arrived','service'].includes(s.status); }
+    assert.equal(isRematchable(req({ status: 'completed', mechanicId: 'm1' })), false);
+    assert.equal(isRematchable(req({ status: 'requested', mechanicId: null })), true);
+    assert.equal(isRematchable(req({ status: 'accepted', mechanicId: 'm1' })), true);
+  });
+  await check('deriveEtaMinutes nearby mechanic gives finite ETA', async () => {
+    const eta = deriveEtaMinutes({ lat: 12.9716, lng: 77.5946 }, req({ etaMin: 15 }));
+    assert.ok(Number.isFinite(eta) && eta >= 1);
+  });
+  await check('scoreMechanic unavailable scores -Infinity', async () => {
+    const sc = scoreMechanic(mech('m1'), req()); assert.ok(Number.isFinite(sc));
+    assert.equal(scoreMechanic(mech('m2', { isAvailable: false }), req()), -Infinity);
+  });
+  console.log(failures.length ? '\n' + failures.length + ' FAILED: ' + failures.join(', ') : '\nAll 9 checks passed');
+  process.exit(failures.length ? 1 : 0);
+}
+const mode = process.argv.includes('--emulator') ? 'emulator' : 'unit';
+if (mode === 'emulator') { console.error('Emulator mode not implemented; use --unit'); process.exit(2); }
+else runUnit().catch((e) => { console.error(e); process.exit(1); });
+
+===== scripts\check-rules.mjs =====
+#!/usr/bin/env node
+/**
+ * scripts/check-rules.mjs
+ *
+ * Static linter for `firestore.rules`. Java-free, no firebase-tools required.
+ *
+ * Why this exists
+ * ---------------
+ * The Firestore emulator-based linter (`firebase emulators:exec --only firestore`)
+ * needs the JVM. This machine doesn't have one. The cached `firebase-tools`
+ * builds in `~/.npm/_npx` no longer expose `lib/rules/rulesets` either, so the
+ * offline `Ruleset` parser is no longer reachable.
+ *
+ * This script is the substitute: a small set of targeted checks against the
+ * rules text that catch the specific Phase 9 invariants we care about. It is
+ * NOT a full grammar parse — it only looks for the lines/blocks we want to
+ * be present.
+ *
+ * Exit codes: 0 if all checks pass, 1 if any fail. Failing checks print
+ * `FAIL:` lines so CI/log scrapers can grep for them.
+ *
+ * Usage
+ * -----
+ *   node scripts/check-rules.mjs                 # lints firestore.rules in repo root
+ *   node scripts/check-rules.mjs path/to/rules   # lints an arbitrary file
+ *
+ * Checks
+ * ------
+ *  R001  isClaimAdmin() helper checks request.auth.token.admin == true
+ *  R002  users/{uid} create rule restricts role to ['customer','mechanic']
+ *  R003  users/{uid} update rule forbids mutating 'approved'
+ *  R004  requests/{id} read allows customer + mechanic-queue + admin
+ *  R005  requests/{id} create requires status == 'requested'
+ *  R006  requests/{id} update has the customer-cancel/rate branch AND its
+ *        hasOnly([...]) permits cancelledAt / cancelledBy / cancellationReason
+ *  R007  mechanic-advance branch freezes mechanicId/mechanicName
+ *  R008  requests/{id} update has the FIRST-ASSIGNMENT branch
+ *  R009  FIRST-ASSIGNMENT branch enforces request.time < offerExpiresAt
+ *  R010  FIRST-ASSIGNMENT branch restricts affected keys to
+ *        {status, mechanicId, mechanicName, etaMin, updatedAt}
+ *  R011  mechanics/{uid} create forces approved == false
+ *  R012  mechanics/{uid} self-update forbids rating/reviewCount mutation
+ *  R013  catch-all {document=**} denies everything
+ */
+
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const argPath = process.argv[2];
+const filePath = argPath
+  ? resolve(argPath)
+  : join(__dirname, '..', 'firestore.rules');
+
+if (!existsSync(filePath)) {
+  process.stderr.write(`ERROR: rules file not found: ${filePath}\n`);
+  process.exit(2);
+}
+
+const src = readFileSync(filePath, 'utf8');
+
+function matchBlock(pathPattern) {
+  // The block header in this repo is `match /<pattern> {` — note there is
+  // NO closing slash between the path and the block-opening brace, even
+  // for the top-level `match /databases/{database}/documents {`. We use a
+  // regex anchored on the path itself plus the literal trailing ` {`.
+  // We escape every regex metachar so callers can pass patterns like
+  // `{document=**}` without thinking about it.
+  const escaped = pathPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`match\\s+/${escaped}\\s*\\{`);
+  const m = re.exec(src);
+  if (!m) return null;
+  const open = src.indexOf('{', m.index + m[0].length - 1);
+  if (open < 0) return null;
+  let depth = 1;
+  let i = open + 1;
+  while (i < src.length && depth > 0) {
+    const ch = src[i];
+    if (ch === '{') depth++;
+    else if (ch === '}') depth--;
+    i++;
+  }
+  return src.slice(open, i);
+}
+
+function hasHelper(name) {
+  return new RegExp(`function\\s+${name}\\s*\\(`).test(src);
+}
+
+function helperBody(name) {
+  const re = new RegExp(`function\\s+${name}\\s*\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\s*\\}`, 'm');
+  const m = src.match(re);
+  return m ? m[1] : null;
+}
+
+const results = [];
+function record(id, label, pass, detail) {
+  results.push({ id, label, pass, detail });
+}
+
+// R001
+{
+  const exists = hasHelper('isClaimAdmin');
+  const body = helperBody('isClaimAdmin');
+  const shaped = body != null && /request\.auth\.token\.admin\s*==\s*true/.test(body);
+  record('R001', 'isClaimAdmin() helper checks request.auth.token.admin == true',
+    exists && shaped,
+    exists ? (shaped ? null : 'isClaimAdmin exists but does not check request.auth.token.admin == true') : 'isClaimAdmin() not defined');
+}
+
+// R002
+{
+  const block = matchBlock('users/{uid}');
+  const start = block ? block.indexOf('allow create:') : -1;
+  const end = block ? block.indexOf('allow update:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /request\.resource\.data\.role\s+in\s+\[\s*['"]customer['"]\s*,\s*['"]mechanic['"]\s*\]/.test(body);
+  record('R002', "users/{uid} create rule restricts role to ['customer','mechanic']",
+    pass,
+    pass ? null : 'create rule does not whitelist customer+mechanic only');
+}
+
+// R003
+{
+  const block = matchBlock('users/{uid}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /!.*['"]approved['"]/.test(body) && /affectedKeys/.test(body);
+  record('R003', "users/{uid} update rule forbids mutating 'approved'",
+    pass,
+    pass ? null : 'no "approved" guard in users/{uid} update rule');
+}
+
+// R004
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow read:') : -1;
+  const end = block ? block.indexOf('allow create:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const hasCustomer = /customerId\s*==\s*request\.auth\.uid/.test(body);
+  const hasMechanicQueue = /status\s*==\s*'requested'\s*&&\s*isMechanicApproved/.test(body);
+  const hasAdmin = /isClaimAdmin\(\)/.test(body);
+  record('R004', 'requests/{id} read allows customer + mechanic-queue + admin',
+    hasCustomer && hasMechanicQueue && hasAdmin,
+    `customer=${hasCustomer} mechanicQueue=${hasMechanicQueue} admin=${hasAdmin}`);
+}
+
+// R005
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow create:') : -1;
+  const end = block ? block.indexOf('allow update:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /request\.resource\.data\.status\s*==\s*'requested'/.test(body);
+  record('R005', "requests/{id} create requires status == 'requested'",
+    pass,
+    pass ? null : 'create rule does not require status == requested');
+}
+
+// R006
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const hasBranch = /resource\.data\.customerId\s*==\s*request\.auth\.uid[\s\S]*?isCustomer\(\)/.test(body)
+    && /status\s+in\s+\[\s*'cancelled'\s*,\s*'completed'\s*\]/.test(body);
+  // The customer branch's hasOnly([...]) must permit the audit fields that
+  // src/lib/customer.ts `cancelRequest` writes; otherwise every customer
+  // cancel is permission-denied. We isolate the FIRST hasOnly after the
+  // customerId guard -- that is the customer branch (the mechanic and
+  // first-assignment branches come after it).
+  const CANCEL_FIELDS = ['cancelledAt', 'cancelledBy', 'cancellationReason'];
+  const custHasOnly = /resource\.data\.customerId\s*==\s*request\.auth\.uid[\s\S]*?hasOnly\(\[([^\]]*)\]\)/.exec(body);
+  const allowed = custHasOnly
+    ? custHasOnly[1].split(',').map((k) => k.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean)
+    : [];
+  const missing = CANCEL_FIELDS.filter((k) => !allowed.includes(k));
+  const pass = hasBranch && missing.length === 0;
+  record('R006', 'requests/{id} update has the customer-cancel/rate branch and permits cancelledAt/cancelledBy/cancellationReason',
+    pass,
+    !hasBranch
+      ? 'customer-cancel/rate branch missing or malformed'
+      : (missing.length ? `customer hasOnly([...]) is missing: ${missing.join(', ')}` : null));
+}
+
+// R007
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const frozenId = /request\.resource\.data\.mechanicId\s*==\s*resource\.data\.mechanicId/.test(body);
+  const frozenName = /request\.resource\.data\.mechanicName\s*==\s*resource\.data\.mechanicName/.test(body);
+  record('R007', 'mechanic-advance branch freezes mechanicId/mechanicName',
+    frozenId && frozenName,
+    `frozenId=${frozenId} frozenName=${frozenName}`);
+}
+
+// R008
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /resource\.data\.status\s*==\s*'requested'\s*&&[\s\S]*?request\.resource\.data\.status\s*==\s*'accepted'/.test(body)
+    && /resource\.data\.mechanicId\s*==\s*null\s*\|\|\s*resource\.data\.mechanicId\s*==\s*''/.test(body)
+    && /request\.resource\.data\.mechanicId\s*==\s*request\.auth\.uid/.test(body);
+  record('R008', 'requests/{id} update has the first-assignment branch',
+    pass,
+    pass ? null : 'first-assignment branch missing or malformed');
+}
+
+// R009
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /request\.time\s*<\s*request\.resource\.data\.offerExpiresAt/.test(body);
+  record('R009', 'first-assignment branch enforces request.time < offerExpiresAt',
+    pass,
+    pass ? null : 'no offerExpiry time check in first-assignment branch');
+}
+
+// R010
+{
+  const block = matchBlock('requests/{id}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /hasOnly\(\[\s*['"]status['"]\s*,\s*['"]mechanicId['"]\s*,\s*['"]mechanicName['"]\s*,\s*['"]etaMin['"]\s*,\s*['"]updatedAt['"]\s*\]\)/.test(body);
+  record('R010', 'first-assignment affected keys = {status, mechanicId, mechanicName, etaMin, updatedAt}',
+    pass,
+    pass ? null : 'hasOnly([...5 keys...]) shape differs');
+}
+
+// R011
+{
+  const block = matchBlock('mechanics/{uid}');
+  const start = block ? block.indexOf('allow create:') : -1;
+  const end = block ? block.indexOf('allow update:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /request\.resource\.data\.approved\s*==\s*false/.test(body);
+  record('R011', "mechanics/{uid} create forces approved == false",
+    pass,
+    pass ? null : 'no approved==false guard in mechanics/{uid} create');
+}
+
+// R012
+{
+  const block = matchBlock('mechanics/{uid}');
+  const start = block ? block.indexOf('allow update:') : -1;
+  const end = block ? block.indexOf('allow delete:', start) : -1;
+  const body = (start >= 0 && end > start) ? block.slice(start, end) : '';
+  const pass = /!.*['"]rating['"]/.test(body) && /!.*['"]reviewCount['"]/.test(body) && /affectedKeys/.test(body);
+  record('R012', "mechanics/{uid} self-update forbids rating/reviewCount mutation",
+    pass,
+    pass ? null : 'rating or reviewCount guard missing in mechanics self-update');
+}
+
+// R013
+{
+  const block = matchBlock('{document=**}');
+  const pass = !!block && /allow\s+read,\s*write:\s*if\s*false/.test(block);
+  record('R013', 'catch-all {document=**} denies everything',
+    pass,
+    pass ? null : 'catch-all deny missing');
+}
+
+let failed = 0;
+for (const r of results) {
+  const tag = r.pass ? 'OK  ' : 'FAIL';
+  if (!r.pass) failed++;
+  process.stdout.write(`${tag}  ${r.id}  ${r.label}`);
+  if (!r.pass && r.detail) process.stdout.write(`  -- ${r.detail}`);
+  process.stdout.write('\n');
+}
+
+process.stdout.write(`\n${results.length - failed}/${results.length} checks passed.\n`);
+process.exit(failed === 0 ? 0 : 1);
+
+===== src\lib\mechanic.ts =====
+/**
+ * Mechanic-facing data access. All accessors are null-safe: if Firebase
+ * is not configured, they return early and the page renders the empty
+ * or error state itself.
+ */
+import {
+  collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction,
+  serverTimestamp, updateDoc, where,
+  type DocumentData, type Unsubscribe,
+} from 'firebase/firestore';
+import { db } from '@/app/firebase';
+import type { ServiceRequest } from './customer';
+import { OFFER_WINDOW_MS } from './customer';
+
+function requireDb() {
+  const handle = db();
+  if (!handle) throw new Error('Firebase is not configured.');
+  return handle;
+}
+
+function asRequest(id: string, raw: DocumentData | undefined): ServiceRequest | null {
+  if (!raw) return null;
+  return { id, ...(raw as Omit<ServiceRequest, 'id'>) };
+}
+
+export type JobStatus = ServiceRequest['status'];
+
+export interface MechanicProfile {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  /** Verification lifecycle for a newly-registered mechanic. */
+  verificationStatus?: 'pending' | 'under_review' | 'approved' | 'rejected';
+  /** True when an admin has approved this mechanic (`verificationStatus === 'approved'`). */
+  approved: boolean;
+  specialties: string[];
+  /** Supported vehicle types (e.g. ['car','motorcycle','suv']). */
+  vehicleTypes?: string[];
+  /** Years of professional experience. */
+  experienceYears?: number;
+  /** Willing to travel up to this many km from the base. */
+  serviceRadiusKm?: number;
+  isAvailable: boolean;
+  rating?: number;
+  reviewCount?: number;
+  vehicleDescription?: string;
+  /** Workshop name (or mobile rig name). */
+  garageName?: string;
+  /** Free-text workshop address; geocoding is a future-phase concern. */
+  garageAddress?: string;
+  /** Current (live) coordinates from watchPosition. */
+  currentLat?: number;
+  /** Current (live) coordinates from watchPosition. */
+  currentLng?: number;
+  /** Epoch ms of the most recent position push to Firestore. */
+  locationUpdatedAt?: number;
+  /** Base (home/garage) location — used for "nearby" distance and ETA. */
+  baseLat?: number;
+  baseLng?: number;
+}
+
+/**
+ * Live queue of jobs in 'requested' state, ordered by recency.
+ *
+ * Firestore has no `array-not-contains` / `array-does-not-contain`,
+ * so a server-side `where('declinedBy', 'not-contains', uid)` is
+ * not possible. The matching engine already excludes `declinedBy`
+ * on the server (`findEligibleMechanics(..., excludeUids)`), but
+ * the dispatch queue snapshot would still *deliver* the declined
+ * doc to the mechanic's listener. We hide it client-side here
+ * instead — no new composite index and no rules change required.
+ *
+ * Pass the current mechanic's uid as `excludeUid` so they never
+ * see a request they already declined. Callers that omit it keep
+ * the previous behaviour (no filtering).
+ */
+export function watchIncoming(
+  cb: (jobs: ServiceRequest[]) => void,
+  excludeUid?: string,
+): Unsubscribe | null {
+  try {
+    const d = requireDb();
+    return onSnapshot(
+      query(collection(d, 'requests'), where('status', '==', 'requested'), orderBy('createdAt', 'desc'), limit(20)),
+      (snap) => {
+        const jobs = snap.docs
+          .map((s) => asRequest(s.id, s.data()))
+          .filter((j): j is ServiceRequest => Boolean(j))
+          .filter((j) => !excludeUid || !(j.declinedBy ?? []).includes(excludeUid));
+        cb(jobs);
+      },
+      () => cb([]),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** Tri-state result of an accept attempt. */
+export type AcceptResult = 'accepted' | 'expired' | 'alreadyTaken' | 'error';
+
+/** Pick a sensible ETA when the customer didn't pass one in. */
+function deriveEta(
+  mechanicBase: { lat: number; lng: number } | undefined,
+  request: ServiceRequest,
+): number {
+  if (mechanicBase) {
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const dLat = toRad(request.customerLat - mechanicBase.lat);
+    const dLng = toRad(request.customerLng - mechanicBase.lng);
+    const lat1 = toRad(mechanicBase.lat);
+    const lat2 = toRad(request.customerLat);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+    const km = 2 * 6371 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+    if (Number.isFinite(km) && km > 0) {
+      return Math.max(1, Math.round((km / 35) * 60));
+    }
+  }
+  return request.etaMin ?? 15;
+}
+
+/**
+ * Accept a queued request.
+ *
+ * Uses a Firestore transaction so the read-then-write is atomic:
+ *   - read the request doc
+ *   - if `status !== 'requested'`, return `alreadyTaken`
+ *   - if `offerExpiresAt < now`, return `expired`
+ *   - otherwise write `accepted` + mechanicId/mechanicName/etaMin/updatedAt
+ *     and return `accepted`
+ *
+ * Pages that only need the boolean ("did it work?") can use:
+ *   `result === 'accepted'`.
+ */
+export async function acceptJob(
+  id: string,
+  mechanicId: string,
+  mechanicName: string,
+  etaMin?: number,
+  mechanicBase?: { lat: number; lng: number },
+): Promise<AcceptResult> {
+  try {
+    const d = requireDb();
+    const ref = doc(d, 'requests', id);
+    const result = await runTransaction(d, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return 'alreadyTaken' as const;
+      const data = snap.data() as ServiceRequest;
+      if (data.status !== 'requested') return 'alreadyTaken' as const;
+      if (data.offerExpiresAt != null && data.offerExpiresAt < Date.now()) {
+        return 'expired' as const;
+      }
+      const eta = etaMin ?? deriveEta(mechanicBase, data);
+      tx.update(ref, {
+        status: 'accepted',
+        mechanicId,
+        mechanicName,
+        etaMin: eta,
+        updatedAt: serverTimestamp(),
+      });
+      return 'accepted' as const;
+    });
+    return result;
+  } catch {
+    return 'error';
+  }
+}
+
+export async function updateJobStatus(id: string, status: JobStatus): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await updateDoc(doc(d, 'requests', id), { status, updatedAt: serverTimestamp() });
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Decline an offer while the request is still in 'requested' state.
+ *
+ * We don't change the request status — only append the mechanic's uid
+ * to `declinedBy[]`. The offer window keeps ticking for the remaining
+ * candidates. Operators see the declinedBy list as a signal that a
+ * mechanic is cycling through offers without accepting.
+ *
+ * A second decline from the same mechanic is a no-op (uid is deduped
+ * in the transaction).
+ */
+export async function declineOffer(
+  requestId: string,
+  mechanicId: string,
+): Promise<'declined' | 'alreadyTaken' | 'forbidden' | 'error'> {
+  try {
+    const d = requireDb();
+    const ref = doc(d, 'requests', requestId);
+    return await runTransaction(d, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return 'alreadyTaken' as const;
+      const data = snap.data() as ServiceRequest;
+      if (data.status !== 'requested') return 'alreadyTaken' as const;
+      const list = Array.isArray(data.declinedBy) ? data.declinedBy : [];
+      if (list.includes(mechanicId)) return 'declined' as const;
+      tx.update(ref, {
+        declinedBy: [...list, mechanicId],
+        updatedAt: serverTimestamp(),
+      });
+      return 'declined' as const;
+    });
+  } catch (e: unknown) {
+    const code = (e as { code?: string } | null)?.code;
+    if (code === 'permission-denied') return 'forbidden';
+    return 'error';
+  }
+}
+
+/** Statuses where the mechanic can still release a job back to the queue. */
+const RELEASABLE_STATUSES = ['accepted', 'on-the-way', 'arrived', 'service'] as const;
+
+/**
+ * Release an accepted job back to the queue.
+ *
+ *  - status  -> 'requested'
+ *  - mechanicId / mechanicName cleared so the offer is open again
+ *  - offerExpiresAt extended by OFFER_WINDOW_MS so the next candidate
+ *    gets a fresh window
+ *  - releaseReason stored for operator audit
+ *
+ * The Firestore rule that protects this branch must use hasOnly(...)
+ * so the mechanic cannot write arbitrary fields.
+ */
+export async function releaseJob(
+  requestId: string,
+  mechanicId: string,
+  reason: string,
+): Promise<'released' | 'not_assigned' | 'invalid_state' | 'forbidden' | 'error'> {
+  try {
+    const d = requireDb();
+    const ref = doc(d, 'requests', requestId);
+    return await runTransaction(d, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return 'invalid_state' as const;
+      const data = snap.data() as ServiceRequest;
+      if (data.mechanicId !== mechanicId) return 'not_assigned' as const;
+      if (!(RELEASABLE_STATUSES as readonly string[]).includes(data.status)) {
+        return 'invalid_state' as const;
+      }
+      tx.update(ref, {
+        status: 'requested',
+        mechanicId: null,
+        mechanicName: null,
+        mechanicLat: null,
+        mechanicLng: null,
+        offerExpiresAt: Date.now() + OFFER_WINDOW_MS,
+        releaseReason: reason,
+        releasedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      return 'released' as const;
+    });
+  } catch (e: unknown) {
+    const code = (e as { code?: string } | null)?.code;
+    if (code === 'permission-denied') return 'forbidden';
+    return 'error';
+  }
+}
+
+export async function getMechanicProfile(uid: string): Promise<MechanicProfile | null> {
+  try {
+    const d = requireDb();
+    const snap = await getDoc(doc(d, 'mechanics', uid));
+    if (!snap.exists()) return null;
+    return { id: snap.id, ...(snap.data() as Omit<MechanicProfile, 'id'>) };
+  } catch { return null; }
+}
+
+export async function setAvailability(uid: string, isAvailable: boolean): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await updateDoc(doc(d, 'mechanics', uid), { isAvailable, updatedAt: serverTimestamp() });
+    return true;
+  } catch { return false; }
+}
+
+/** Push the mechanic's live GPS coordinates onto their own profile doc. */
+export async function pushMechanicLocation(uid: string, lat: number, lng: number): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await updateDoc(doc(d, 'mechanics', uid), {
+      currentLat: lat,
+      currentLng: lng,
+      locationUpdatedAt: Date.now(),
+      updatedAt: serverTimestamp(),
+    });
+    return true;
+  } catch { return false; }
+}
+
+/** Push the mechanic's live GPS coordinates onto the in-flight request. */
+export async function pushMechanicLocationToRequest(requestId: string, lat: number, lng: number): Promise<boolean> {
+  try {
+    const d = requireDb();
+    await updateDoc(doc(d, 'requests', requestId), {
+      mechanicLat: lat,
+      mechanicLng: lng,
+      updatedAt: serverTimestamp(),
+    });
+    return true;
+  } catch { return false; }
+}
+
+export async function listCompletedJobs(mechanicId: string, max = 30): Promise<ServiceRequest[]> {
+  try {
+    const d = requireDb();
+    const snap = await getDocs(
+      query(collection(d, 'requests'),
+        where('mechanicId', '==', mechanicId),
+        where('status', '==', 'completed'),
+        orderBy('updatedAt', 'desc'),
+        limit(max),
+      ),
+    );
+    return snap.docs.map((s) => asRequest(s.id, s.data())).filter((r): r is ServiceRequest => Boolean(r));
+  } catch { return []; }
+}
+
+export async function listActiveJob(mechanicId: string): Promise<ServiceRequest | null> {
+  try {
+    const d = requireDb();
+    const snap = await getDocs(
+      query(collection(d, 'requests'),
+        where('mechanicId', '==', mechanicId),
+        where('status', 'in', ['accepted', 'on-the-way', 'arrived', 'service']),
+        limit(1),
+      ),
+    );
+    if (snap.empty) return null;
+    const doc0 = snap.docs[0];
+    return asRequest(doc0.id, doc0.data());
+  } catch { return null; }
+}
+

@@ -237,7 +237,7 @@ export function LifecycleArt({ className, style }: { className?: string; style?:
       className={cx('h-full w-full text-fg-app', className)}
       style={style}
     >
-      <title id="lifecycle-title">The MECHIST lifecycle: Find, Match, Dispatch, Track, Resolve.</title>
+      <title id="lifecycle-title">The RoadAssisst lifecycle: Find, Match, Dispatch, Track, Resolve.</title>
       <defs>
         <linearGradient id="lcLine" x1="0" x2="1" y1="0" y2="0">
           <stop offset="0%" stopColor="rgb(59 125 255)" />
@@ -426,7 +426,7 @@ export function LogoMark({ className }: { className?: string }) {
   return (
     <svg
       role="img"
-      aria-label="MECHIST mark"
+      aria-label="RoadAssisst mark"
       viewBox="0 0 32 32"
       className={cx('h-full w-full', className)}
     >

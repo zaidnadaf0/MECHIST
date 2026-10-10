@@ -65,7 +65,7 @@ export function FinalCTA() {
 
             <h2 className="display mt-5 text-display-xl text-fg-app text-balance">
               Need assistance right now?{' '}
-              <span className="text-gradient-signal">MECHIST is on standby.</span>
+              <span className="text-gradient-signal">RoadAssisst is on standby.</span>
             </h2>
 
             <p className="mt-4 max-w-2xl text-body-lg text-fg-muted text-pretty">

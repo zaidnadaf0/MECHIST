@@ -22,29 +22,34 @@
  *   - OrbitingCircles      — two layers of mechanic / city nodes
  *   - HeroVideoDialog      — preview
  */
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, type ReactNode, Suspense, lazy } from 'react';
 import {
   ArrowRight,
   Battery,
   Car,
   Clock,
+  LogOut,
   MapPin,
   ShieldCheck,
+  UserCog,
   Wrench,
   Wrench as WrenchIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { Avatar, Badge, Button } from '@/components/ui';
-import { ErrorBoundary } from '@/components/feedback';
+import { ErrorBoundary, Skeleton } from '@/components/feedback';
 import {
-  AnimatedGridPattern,
   BlurFade,
-  Globe,
   HeroVideoDialog,
-  OrbitingCircles,
   ShimmerButton,
   TextAnimate,
 } from '@/components/magicui';
+import { useAuth } from '@/app/AuthProvider';
+
+// Lazy-load heavy Three.js/animation components
+const Globe = lazy(() => import('@/components/magicui/globe').then((m) => ({ default: m.Globe })));
+const OrbitingCircles = lazy(() => import('@/components/magicui/orbiting-circles').then((m) => ({ default: m.OrbitingCircles })));
+const AnimatedGridPattern = lazy(() => import('@/components/magicui/animated-grid-pattern').then((m) => ({ default: m.AnimatedGridPattern })));
 
 /* -------------------------------------------------------------------------- */
 /* Static data                                                                */
@@ -85,6 +90,10 @@ const OUTER_CITIES = ['NYC', 'CHI', 'AUS', 'LAX', 'SEA', 'MIA'] as const;
 /* -------------------------------------------------------------------------- */
 
 export function Hero() {
+  const { user, signOut, role } = useAuth();
+  const isSignedIn = Boolean(user);
+  const roleLabel = role === 'customer' ? 'Customer' : role === 'mechanic' ? 'Mechanic' : role === 'admin' ? 'Admin' : 'User';
+
   return (
     <section className="relative isolate overflow-hidden">
       <span aria-hidden className="mesh-layer opacity-80" />
@@ -100,9 +109,9 @@ export function Hero() {
               <div className="flex flex-wrap items-center gap-3">
                 <Badge tone="azure" className="h-7 pl-1.5 pr-3">
                   <span aria-hidden className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-azure-500 shadow-[0_0_0_3px_rgb(59_125_255/0.18)]" />
-                  Roadside assistance, modernised
+                  Roadside help, when you need it
                 </Badge>
-                <span className="eyebrow">14 cities · 24/7</span>
+                <span className="eyebrow">24/7 live dispatch</span>
               </div>
             </BlurFade>
 
@@ -144,10 +153,37 @@ export function Hero() {
                   Find a mechanic
                 </Button>
                 <span className="text-small text-fg-subtle">
-                  <span className="stat-num text-fg-app">$0</span> to start · no app to download
+                  No app to download · transparent per-job pricing
                 </span>
               </div>
             </BlurFade>
+
+            {/* Switch account / Sign out for signed-in users */}
+            {isSignedIn && (
+              <BlurFade inView={false} delay={0.78}>
+                <div className="mt-6 flex flex-wrap items-center gap-3">
+                  <span className="text-small text-fg-muted">
+                    Signed in as <span className="font-medium text-fg-app">{roleLabel}</span>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<UserCog size={16} />}
+                    onClick={() => { signOut(); window.location.href = '/login'; }}
+                  >
+                    Switch account
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<LogOut size={16} />}
+                    onClick={() => { signOut(); window.location.href = '/'; }}
+                  >
+                    Sign out
+                  </Button>
+                </div>
+              </BlurFade>
+            )}
 
             <BlurFade inView={false} delay={0.72}>
               <ul className="mt-9 grid max-w-xl gap-px overflow-hidden rounded-lg border border-line-soft bg-hair/[0.08]">
@@ -221,16 +257,18 @@ function Stage() {
 
       {/* viewport: grid + globe + orbits + video trigger */}
       <div className="relative isolate aspect-[16/11] overflow-hidden bg-surface-inset">
-        <AnimatedGridPattern
-          size={36}
-          innerStop={20}
-          outerStop={100}
-          opacity={0.35}
-          highlightSpan={2}
-          strokeColor="rgb(34 199 194)"
-          highlightColor="rgb(59 125 255)"
-          className="z-0"
-        />
+        <Suspense fallback={<div className="absolute inset-0 z-0 grid place-items-center"><Skeleton className="h-32 w-32" /></div>}>
+          <AnimatedGridPattern
+            size={36}
+            innerStop={20}
+            outerStop={100}
+            opacity={0.35}
+            highlightSpan={2}
+            strokeColor="rgb(34 199 194)"
+            highlightColor="rgb(59 125 255)"
+            className="z-0"
+          />
+        </Suspense>
         {/* Soft radial highlight behind the globe so it reads as the focal point. */}
         <span
           aria-hidden
@@ -308,37 +346,42 @@ function Orbits() {
       <div className="relative" style={{ width: 360, height: 360 }}>
         {/* Globe backdrop */}
         <div className="absolute inset-0 grid place-items-center">
-          <Globe radius={150} color="rgb(34 199 194)" landColor="rgba(59, 125, 255, 0.55)" />
+          <Suspense fallback={<div className="absolute inset-0 grid place-items-center"><Skeleton className="h-64 w-64 rounded-full" /></div>}>
+            <Globe radius={150} color="rgb(34 199 194)" landColor="rgba(59, 125, 255, 0.55)" />
+          </Suspense>
         </div>
 
         {/* Inner orbit — mechanic disciplines */}
-        <OrbitingCircles
-          radius={120}
-          duration={22}
-          className="left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-        >
-          <OrbitChipStack nodes={INNER_NODES} />
-        </OrbitingCircles>
+        <Suspense fallback={<div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"><Skeleton className="h-11 w-11" /></div>}>
+          <OrbitingCircles
+            radius={120}
+            duration={22}
+            className="left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+          >
+            <OrbitChipStack nodes={INNER_NODES} />
+          </OrbitingCircles>
+        </Suspense>
 
         {/* Outer orbit — city dots */}
         {outerDots.map((city) => (
-          <OrbitingCircles
-            key={city.label}
-            radius={170}
-            duration={city.duration}
-            reverse={city.reverse}
-            delay={city.delay}
-            className="left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-          >
-            <CityDot label={city.label} />
-          </OrbitingCircles>
+          <Suspense key={city.label} fallback={<div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"><Skeleton className="h-7 w-7" /></div>}>
+            <OrbitingCircles
+              radius={170}
+              duration={city.duration}
+              reverse={city.reverse}
+              delay={city.delay}
+              className="left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+            >
+              <CityDot label={city.label} />
+            </OrbitingCircles>
+          </Suspense>
         ))}
 
         {/* Center video trigger */}
         <HeroVideoDialog
           videoSrc="/preview.mp4"
           posterSrc="/preview-poster.jpg"
-          title="See MECHIST in action"
+          title="See RoadAssisst in action"
           className="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 h-20 w-20"
         >
           <CenterTrigger />

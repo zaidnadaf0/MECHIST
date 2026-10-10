@@ -14,6 +14,7 @@
 import { doc, getDoc, serverTimestamp, setDoc, updateDoc, writeBatch, type DocumentData } from 'firebase/firestore';
 import { getIdTokenResult } from 'firebase/auth';
 import { db, auth as fbAuth } from '@/app/firebase';
+import { demoRole, isDemo } from '@/lib/demo';
 
 export type PublicRole = 'customer' | 'mechanic';
 export type VerificationStatus = 'pending' | 'under_review' | 'approved' | 'rejected';
@@ -66,8 +67,10 @@ export async function createCustomerUserDoc(uid: string, input: CustomerProfileI
 
 /** Create the canonical `users/{uid}` AND `mechanics/{uid}` documents for a mechanic.
  *
- * The two writes are committed in a single Firestore batch so they either
- * both land or neither does — a half-written mechanic (users doc only, no
+ * Contact fields (`phone`, `email`) live in `mechanics/{uid}/private/contact`
+ * (owner + admin only) — never in the publicly-readable parent doc. The
+ * three writes are committed in a single Firestore batch so they either
+ * all land or none does — a half-written mechanic (users doc only, no
  * mechanics doc) would leave the user signed in with `role: 'mechanic'`
  * but no profile, and the rules make that a hard state to recover from. */
 export async function createMechanicUserDocs(uid: string, input: MechanicProfileInput): Promise<boolean> {
@@ -85,8 +88,6 @@ export async function createMechanicUserDocs(uid: string, input: MechanicProfile
     const mechDoc: DocumentData = {
       uid,
       name: input.fullName.trim(),
-      phone: input.phone?.trim() || null,
-      email: input.email.trim().toLowerCase(),
       approved: false,
       verificationStatus: 'pending' as VerificationStatus,
       specialties: input.specialties,
@@ -102,19 +103,34 @@ export async function createMechanicUserDocs(uid: string, input: MechanicProfile
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
+    const contactDoc: DocumentData = {
+      phone: input.phone?.trim() || null,
+      email: input.email.trim().toLowerCase(),
+      updatedAt: serverTimestamp(),
+    };
     const batch = writeBatch(d);
     batch.set(doc(d, 'users', uid), userDoc);
     batch.set(doc(d, 'mechanics', uid), mechDoc);
+    batch.set(doc(d, 'mechanics', uid, 'private', 'contact'), contactDoc);
     await batch.commit();
     return true;
   } catch { return false; }
 }
 
-/** Read the role for the signed-in user from `users/{uid}.role`. Returns null if not found. */
-export async function fetchUserRole(uid: string): Promise<PublicRole | 'admin' | null> {
+/**
+ * Read the role for the signed-in user from `users/{uid}.role`.
+ * Returns null if not found. Bounded by a timeout so a stalled network
+ * can never leave the app on the global loading screen forever — the
+ * caller treats null as "no role" and route guards handle the rest.
+ */
+export async function fetchUserRole(uid: string, timeoutMs = 8000): Promise<PublicRole | 'admin' | null> {
+  if (isDemo()) return demoRole();
   try {
     const d = requireDb();
-    const snap = await getDoc(doc(d, 'users', uid));
+    const snap = await Promise.race([
+      getDoc(doc(d, 'users', uid)),
+      new Promise<never>((_, reject) => globalThis.setTimeout(() => reject(new Error('role-timeout')), timeoutMs)),
+    ]);
     if (!snap.exists()) return null;
     const data = snap.data() as { role?: string };
     if (data.role === 'customer' || data.role === 'mechanic' || data.role === 'admin') return data.role;
@@ -155,20 +171,29 @@ export async function confirmUserRoleReadable(
 }
 
 /**
- * Read the admin custom claim from the current user's ID token. The
- * Firestore security rules trust ONLY the custom claim
- * (`request.auth.token.admin == true`) — the `users/{uid}.role`
- * field is a UI/profile hint, not a security boundary. This helper
- * forces a fresh token read so a freshly-provisioned claim is seen
- * after the user signs back in.
+ * Read the admin custom claim from the user's CACHED ID token (no refresh).
+ * Use this for passive UI gating; use verifyAdminClaim() when a fresh
+ * read is required (login, post-grant refresh). Returns null with no user.
+ */
+export async function readAdminClaim(
+  user: { getIdTokenResult: (forceRefresh?: boolean) => Promise<{ claims?: Record<string, unknown> }> } | null | undefined,
+): Promise<boolean | null> {
+  try {
+    if (!user) return null;
+    const token = await user.getIdTokenResult(false);
+    return token.claims?.admin === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the admin custom claim with a FORCED token refresh. The Firestore
+ * security rules trust ONLY the custom claim (`request.auth.token.admin ==
+ * true`) — the `users/{uid}.role` field is a UI/profile hint, not a
+ * security boundary.
  *
- * Returns:
- *   - true   → admin claim is present.
- *   - false  → signed in but the admin claim is missing.
- *   - null   → no signed-in user (caller should redirect to /login).
- *
- * Never call this server-side — it touches the current user's ID
- * token, which is only available in the browser SDK.
+ * Returns true / false / null (no user). Never call server-side.
  */
 export async function verifyAdminClaim(): Promise<boolean | null> {
   try {
@@ -210,4 +235,17 @@ export async function setUserRoleDoc(uid: string, role: PublicRole | 'admin' | n
     }
     return 'error';
   }
+}
+
+/**
+ * Pure admin-portal gate (Phase 1C). Functional admin access requires BOTH:
+ * the profile hint (`role === 'admin'`) for routing AND the Firebase ID-token
+ * claim (`isAdminClaim === true`) for authority. A doc-role admin WITHOUT the
+ * claim gets nothing. Used by RequireAuth and covered by unit tests.
+ */
+export function isAdminAuthorized(
+  role: string | null | undefined,
+  isAdminClaim: boolean | null | undefined,
+): boolean {
+  return role === 'admin' && isAdminClaim === true;
 }

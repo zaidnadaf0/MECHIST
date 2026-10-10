@@ -25,7 +25,7 @@ import { sendPasswordResetEmail } from 'firebase/auth';
 import { friendlyAuthError, isValidEmailShape } from '@/lib/authUI';
 
 export function CustomerLogin() {
-  const { signIn, user, role, configured } = useAuth();
+  const { signIn, signOut, user, role, configured } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -47,7 +47,37 @@ export function CustomerLogin() {
     }
   }, [user, role, navigate]);
 
-  if (user && role === 'customer') return null;
+  // Already signed in as this role: show an explicit handoff card
+  // (with sign-out) instead of a blank screen while redirecting.
+  if (user && role === 'customer') {
+    return (
+      <AuthScreen
+        icon={<Car className="h-5 w-5" />}
+        hue="azure"
+        eyebrow="Customer sign-in"
+        title="You're already signed in"
+        description="Continue to your customer dashboard, or sign out to use a different account."
+        configured={configured}
+        backHref="/login"
+        backLabel="Choose a different role"
+      >
+        <Card tone="azure" elevated>
+          <div className="flex flex-col gap-3">
+            <Button
+              variant="primary" size="lg" fullWidth
+              rightIcon={<ArrowRight className="h-4 w-4" />}
+              onClick={() => navigate('/dashboard')}
+            >
+              Continue to dashboard
+            </Button>
+            <Button variant="ghost" size="md" fullWidth onClick={() => void signOut()}>
+              Sign out
+            </Button>
+          </div>
+        </Card>
+      </AuthScreen>
+    );
+  }
 
   const onForgot = async () => {
     setError(null); setErrorBody(null); setWrongPortal(null); setResetSent(false);
@@ -116,7 +146,7 @@ export function CustomerLogin() {
       icon={<Car className="h-5 w-5" />}
       hue="azure"
       eyebrow="Customer sign-in"
-      title="Welcome back to MECHIST"
+      title="Welcome back to RoadAssisst"
       description="Sign in to request help, track a live service, and manage your vehicles."
       configured={configured}
       backHref="/login"
@@ -173,7 +203,7 @@ export function CustomerLogin() {
                 tone="warning"
                 icon={<ShieldAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />}
                 title={<>This is a staff account. Use the{' '}
-                  <Link to="/admin/login" className="underline">MECHIST control room sign-in</Link>.</>}
+                  <Link to="/admin/login" className="underline">RoadAssisst control room sign-in</Link>.</>}
               />
             )}
             {error && (
@@ -190,7 +220,7 @@ export function CustomerLogin() {
         </form>
 
         <p className="mt-5 text-center text-xs text-fg-subtle">
-          By continuing you agree to MECHIST's terms and privacy policy.
+          By continuing you agree to RoadAssisst's terms and privacy policy.
         </p>
       </Card>
     </AuthScreen>

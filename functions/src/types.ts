@@ -18,6 +18,10 @@ export interface ServiceRequest {
   customerLng: number;
   mechanicId?: string | null;
   mechanicName?: string | null;
+  /** Assigned mechanic's contact number, denormalized server-side on
+   *  accept (admin SDK reads private/contact). Lets the customer call
+   *  without ever reading the mechanics collection. Cleared on rematch. */
+  mechanicPhone?: string | null;
   mechanicLat?: number | null;
   mechanicLng?: number | null;
   etaMin?: number;
@@ -28,6 +32,9 @@ export interface ServiceRequest {
   cancellationReason?: string;
   rating?: number;
   comment?: string;
+  /** Set by the rating-aggregation trigger after folding `rating` into the
+   *  mechanic profile. Prevents double-counting on function retries. */
+  ratingAggregated?: boolean;
   createdAt: number;
   updatedAt: number;
   cancelledAt?: number;

@@ -12,6 +12,7 @@ export function Users() {
   const toast = useToast();
   const [items, setItems] = useState<UserSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [busyUid, setBusyUid] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
@@ -34,7 +35,10 @@ export function Users() {
       });
       return;
     }
+    // The row updates only after the backend confirms the write.
+    setBusyUid(uid);
     const result = await setUserRole(uid, role);
+    setBusyUid(null);
     if (result === 'ok') {
       if (items) setItems(items.map((u) => u.id === uid ? { ...u, role: role ?? undefined } : u));
       toast.push({ title: 'Role updated', tone: 'success' });
@@ -80,7 +84,7 @@ export function Users() {
                     <Badge tone={u.role === 'admin' ? 'danger' : u.role === 'mechanic' ? 'brand' : 'neutral'}>
                       {u.role ?? 'unset'}
                     </Badge>
-                    <Select aria-label="Role" value={u.role ?? ''} onChange={(e) => onRole(u.id, (e.target.value || undefined) as UserSummary['role'])}>
+                    <Select aria-label={`Role for ${u.email ?? u.id}`} value={u.role ?? ''} disabled={busyUid === u.id} onChange={(e) => onRole(u.id, (e.target.value || undefined) as UserSummary['role'])}>
                       <option value="">Unset</option>
                       <option value="customer">Customer</option>
                       <option value="mechanic">Mechanic</option>

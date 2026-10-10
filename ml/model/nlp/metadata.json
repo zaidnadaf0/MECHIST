@@ -1,0 +1,13 @@
+{
+  "seed": 42,
+  "model": "LogisticRegression+Tfidf",
+  "categories": [
+    "battery",
+    "engine",
+    "flat-tyre",
+    "other",
+    "tow"
+  ],
+  "n_train": 1587,
+  "n_test": 397
+}

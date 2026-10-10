@@ -26,6 +26,8 @@ import type { MechanicProfile } from '@/lib/mechanic';
 
 const ASSIGNABLE = new Set(['requested', 'accepted', 'on-the-way', 'arrived', 'service']);
 
+type QueueFilter = 'all' | 'unassigned' | 'inflight' | 'closed';
+
 export function RequestsQueue() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -36,6 +38,7 @@ export function RequestsQueue() {
   const [pickByReq, setPickByReq] = useState<Record<string, string>>({});
   const [busyByReq, setBusyByReq] = useState<Record<string, boolean>>({});
   const [exportBusy, setExportBusy] = useState(false);
+  const [filter, setFilter] = useState<QueueFilter>('all');
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
@@ -51,8 +54,20 @@ export function RequestsQueue() {
 
   const mechanicOptions = useMemo(() => {
     if (!mechanics) return [];
-    return mechanics.map((m) => ({ id: m.id, label: `${m.name} — ${m.approved ? 'approved' : 'pending'}${m.isAvailable ? '' : ' (offline)'}` }));
+    // Eligible pool only (approved + available), consistent with Dispatch.
+    // The transactions + rules stay authoritative.
+    return mechanics
+      .filter((m) => m.approved && m.isAvailable)
+      .map((m) => ({ id: m.id, label: m.name }));
   }, [mechanics]);
+
+  const visible = useMemo(() => {
+    if (!items) return null;
+    if (filter === 'unassigned') return items.filter((r) => r.status === 'requested' && !r.mechanicId);
+    if (filter === 'inflight') return items.filter((r) => ASSIGNABLE.has(r.status) && (r.status !== 'requested' || r.mechanicId));
+    if (filter === 'closed') return items.filter((r) => r.status === 'completed' || r.status === 'cancelled');
+    return items;
+  }, [items, filter]);
 
   if (!user) return null;
 
@@ -130,18 +145,28 @@ export function RequestsQueue() {
           </Button>
           <span className="text-xs text-fg-subtle">Admin-only · rate-limited · reads live Firestore</span>
         </div>
+        <div className="mt-3 flex flex-wrap gap-2" role="group" aria-label="Queue filter">
+          {(['all', 'unassigned', 'inflight', 'closed'] as const).map((f) => (
+            <button
+              key={f} type="button" onClick={() => setFilter(f)} aria-pressed={filter === f}
+              className={'rounded-full px-3.5 py-1.5 text-small font-mono ring-1 ring-inset transition-colors ' + (filter === f ? 'bg-ink-900 text-white ring-ink-900 dark:bg-white dark:text-ink-900' : 'text-fg-muted ring-line-soft hover:text-fg-app')}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
       </FadeIn>
 
       <div className="mt-8">
         {err ? (
           <ErrorState kind="api" title="Could not load requests" description={err} retryLabel="Retry" onRetry={() => location.reload()} />
-        ) : items === null ? (
+        ) : visible === null ? (
           <div className="grid gap-3">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
-        ) : items.length === 0 ? (
-          <EmptyState kind="requests" title="No requests yet" />
+        ) : visible.length === 0 ? (
+          <EmptyState kind="requests" title="No requests here" description={filter === 'all' ? undefined : 'Try a different filter.'} />
         ) : (
           <div className="grid gap-3">
-            {items.map((r) => {
+            {visible.map((r) => {
               const isAssignable = ASSIGNABLE.has(r.status);
               const mode: 'assign' | 'reassign' = r.status === 'requested' ? 'assign' : 'reassign';
               const busy = !!busyByReq[r.id];
@@ -156,7 +181,7 @@ export function RequestsQueue() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Badge tone={r.status === 'completed' ? 'success' : r.status === 'cancelled' ? 'danger' : 'brand'}>{r.status}</Badge>
-                    <Link to={`/track/${r.id}`}><Button variant="secondary" size="sm">View</Button></Link>
+                    <Link to="/admin/dispatch"><Button variant="secondary" size="sm">Dispatch</Button></Link>
                     {r.status !== 'completed' && r.status !== 'cancelled' && (
                       <Button variant="danger" size="sm" onClick={() => onCancel(r.id)}>Cancel</Button>
                     )}

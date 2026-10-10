@@ -12,6 +12,9 @@
  * client (no service-account key in the React app). This script is the
  * out-of-band bootstrap that the first admin uses once, after which a Cloud
  * Function can mint further claims.
+ * In addition to the claim it synchronizes the `users/{uid}.role` UI hint
+ * (grant -> 'admin'; revoke -> 'customer' only when the hint reads 'admin'),
+ * because the client-side rules freeze `role` for normal writers.
  *
  * Usage
  * -----
@@ -26,6 +29,7 @@
  * -----
  *   --uid <uid>     Target user UID (required).
  *   --revoke        Strip the claim instead of setting it.
+ *   --no-sync       Skip the users/{uid}.role hint sync (claim only).
  *   --dry-run       Print what would happen without contacting Firebase.
  *   --help          Show this help.
  *
@@ -54,11 +58,12 @@ const AUDIT_PATH = join(__dirname, 'last-claim.json');
 // ---------- args ----------
 
 function parseArgs(argv) {
-  const out = { uid: null, revoke: false, dryRun: false, help: false };
+  const out = { uid: null, revoke: false, dryRun: false, help: false, sync: true };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--uid')    { out.uid   = argv[++i] ?? null; continue; }
     if (a === '--revoke') { out.revoke = true;             continue; }
+    if (a === '--no-sync'){ out.sync = false;              continue; }
     if (a === '--dry-run'){ out.dryRun = true;             continue; }
     if (a === '-h' || a === '--help') { out.help = true;   continue; }
     if (a.startsWith('--uid=')) { out.uid = a.slice('--uid='.length); continue; }
@@ -123,6 +128,7 @@ async function main() {
       saPath,
       uid: args.uid,
       action: args.revoke ? 'revoke' : 'grant',
+      roleSync: args.sync ? (args.revoke ? "users/{uid}.role -> 'customer' (only if currently 'admin')" : "users/{uid}.role -> 'admin' (merge)") : 'skipped (--no-sync)',
     }, null, 2) + '\n');
     return;
   }
@@ -154,6 +160,32 @@ async function main() {
     process.exit(4);
   }
 
+  // Synchronize the users/{uid}.role UI hint (Admin SDK bypasses the
+  // client-side role freeze in firestore.rules, so this is the only safe
+  // writer). Grant -> 'admin'; revoke -> 'customer' only when the hint
+  // currently reads 'admin' (otherwise leave the real role untouched).
+  let roleSync = 'skipped (--no-sync)';
+  if (args.sync) {
+    try {
+      const ref = app.firestore().collection('users').doc(args.uid);
+      if (!args.revoke) {
+        await ref.set({ role: 'admin' }, { merge: true });
+        roleSync = "users/{uid}.role -> 'admin'";
+      } else {
+        const snap = await ref.get();
+        if (snap.exists && snap.data()?.role === 'admin') {
+          await ref.set({ role: 'customer' }, { merge: true });
+          roleSync = "users/{uid}.role 'admin' -> 'customer'";
+        } else {
+          roleSync = 'left untouched (hint was not admin)';
+        }
+      }
+    } catch (e) {
+      process.stderr.write(`WARNING: claim was set but role-hint sync failed: ${(e && e.message) || e}\n`);
+      roleSync = `FAILED: ${(e && e.message) || e}`;
+    }
+  }
+
   // Local audit record. Gitignored — see .gitignore.
   const audit = {
     uid: args.uid,
@@ -169,8 +201,9 @@ async function main() {
 
   process.stdout.write(
     `OK: ${audit.action}ed admin claim for uid=${audit.uid} at ${audit.at}\n` +
+    `   role sync: ${roleSync}\n` +
     `   (audit: ${AUDIT_PATH})\n` +
-    `   Reminder: the user must sign out and back in to refresh their ID token.\n`
+    `   Reminder: the user must sign out and back in (or refresh their token) to pick up the claim.\n`
   );
 }
 

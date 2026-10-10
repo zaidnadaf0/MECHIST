@@ -1,0 +1,16 @@
+{
+  "bg-1": {
+    "id": "bg-1",
+    "cmd": "npm run build 2>&1 | Select-Object -Last 15",
+    "cwd": "D:\\MECHIST",
+    "pid": 15244,
+    "start_time": 1788630199.642794,
+    "start_time_iso": "2026-09-05T17:43:19Z",
+    "status": "completed",
+    "log_file": ".utim_tmp/tasks/bg-1.log",
+    "exit_code": 0,
+    "duration_seconds": 27.11,
+    "end_time": 1788630223.711205,
+    "end_time_iso": "2026-09-05T17:43:43Z"
+  }
+}

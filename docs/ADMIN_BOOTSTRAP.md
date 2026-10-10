@@ -53,7 +53,9 @@ file is the runbook for that seed step.
 ### Option B — scripts/setAdminClaim.mjs (repeatable, CI-friendly)
 
 This repo ships a Node script that takes a service-account JSON key and a
-UID and writes the claim.
+UID, writes the claim, **and synchronizes the `users/{uid}.role` UI hint**
+(grant → `'admin'` merge; revoke → `'customer'` only when the hint reads
+`'admin'`, otherwise untouched; `--no-sync` skips the Firestore write).
 
 ```bash
 # 1. Download a service-account key from Firebase Console:
@@ -64,7 +66,8 @@ export GOOGLE_APPLICATION_CREDENTIALS=~/.mechist/sa.json
 node scripts/setAdminClaim.mjs --uid <ADMIN_UID> --revoke=false
 ```
 
-`--revoke=true` strips the claim for off-boarding.
+`--revoke=true` strips the claim for off-boarding (plus the hint demotion
+above). `--dry-run` prints the plan without contacting Firebase.
 
 The script writes a `last-claim.json` next to itself (gitignored) recording
 the last successful claim flip for audit.
@@ -73,19 +76,45 @@ the last successful claim flip for audit.
 > Firebase project. The repo's `.gitignore` already excludes
 > `scripts/last-claim.json`; keep the SA key outside the repo entirely.
 
-### Option C — Firebase Admin SDK in a Cloud Function (the right long-term answer)
+### Option C — Cloud Function callables (implemented, Phase 1C)
 
-For an environment with more than one admin or frequent role changes, write
-a callable Cloud Function `setAdminClaim` that:
+`functions/src/admin.ts` exposes two claim-admin-only callables:
 
-1. Verifies the caller is themselves an admin claim holder.
-2. Sets the target user's `admin: true` custom claim.
-3. Optionally writes `users/{uid}.role = 'admin'` for the UI hint.
+- `grantAdminRole({ uid })` — requires caller `token.admin == true`; sets
+  the target's `{ admin: true }` claim **and** merges
+  `users/{uid}.role = 'admin'`.
+- `revokeAdminRole({ uid })` — same caller gate; clears the target's claims
+  entirely and demotes the hint to `'customer'` only when it reads `'admin'`.
 
-Then expose a small admin-only panel in `/admin/users` that calls it. The
-details are out of scope for the MVP (this file's goal is to unblock the
-first admin so `/admin` is reachable); the script in Option B is the
-interim bridge.
+No admin UI calls them yet — the `/admin/users` role dropdown still writes
+`users.role` directly (which the Phase 1B rules intentionally deny for
+`admin`; see the `forbidden-claim-required` toast). Wiring that dropdown to
+these callables is a later admin-operations phase; do NOT loosen the rule
+to make the dropdown work.
+
+### Token refresh after any grant/revoke
+
+Custom claims ride the Firebase ID token, which caches for ~1 hour:
+
+1. Preferred (no sign-out): the app exposes `refreshAdminClaim()` on the
+   auth context — it calls `user.getIdToken(true)` (force refresh) and
+   re-resolves role + claim. Call it from an explicit user action or a
+   permission-denied recovery path, never on a timer.
+2. Fallback: sign the user out and back in (`AdminLogin` does a forced
+   `getIdTokenResult(..., true)` read on every submit).
+3. The script reminds the operator of this on every successful flip.
+4. A revoked admin loses functional access at the next token refresh at
+   the latest — Firestore rules re-evaluate `token.admin` per request.
+
+### users/{uid}.role is a hint; token.admin is the authority
+
+- Real admin ⟺ `token.admin == true` **and** (for routing) hint `== 'admin'`.
+- The `/admin/*` routes additionally require the claim
+  (`RequireAuth requireAdminClaim` in `src/App.tsx`), checked against the
+  `isAdmin` value in the auth context (cached token read, refreshed
+  explicitly). A doc-role admin without the claim is bounced to `/` and
+  shown the "claim missing" guard on `/admin/login` — never the shell.
+- Client code must NEVER treat the doc field as sufficient authority.
 
 ---
 
@@ -96,13 +125,16 @@ Force-refresh the user's token after.
 
 ## Verify
 
-After the claim is set and the user re-signs-in, they should be able to:
+After the claim is set and the token refreshed, they should be able to:
 
-- Sign in via `/admin/login` — the page confirms `users/{uid}.role === 'admin'`
-  *and* (defensively) the Firestore rules now permit the AdminDashboard reads.
+- Sign in via `/admin/login` — the page confirms **both**
+  `token.admin === true` (authoritative) and `users/{uid}.role === 'admin'`
+  (hint). Either missing → signed out with a precise message.
+- Reach `/admin/*` — `RequireAuth requireAdminClaim` re-checks the claim
+  from context; doc-only admins bounce to `/`.
 - See non-empty data in `/admin`, `/admin/mechanics`, `/admin/requests`,
   `/admin/users`. If everything is still empty, the claim did not propagate
-  to the ID token — have the user sign out and back in.
+  to the ID token — refresh the token (or sign out and back in).
 
 ## What is *not* in scope here
 

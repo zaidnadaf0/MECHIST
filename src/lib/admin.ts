@@ -10,6 +10,7 @@ import {
 import { db } from '@/app/firebase';
 import type { ServiceRequest } from './customer';
 import type { MechanicProfile } from './mechanic';
+import { DEMO_MECHANICS, DEMO_REQUESTS, DEMO_USERS, isDemo } from './demo';
 
 function requireDb() {
   const handle = db();
@@ -35,6 +36,7 @@ export interface UserSummary {
 }
 
 export async function listAllMechanics(max = 100): Promise<MechanicProfile[]> {
+  if (isDemo()) return DEMO_MECHANICS.slice(0, max);
   try {
     const d = requireDb();
     const snap = await getDocs(query(collection(d, 'mechanics'), orderBy('name', 'asc'), limit(max)));
@@ -44,6 +46,7 @@ export async function listAllMechanics(max = 100): Promise<MechanicProfile[]> {
 
 /** Realtime variant: streams every mechanic as it changes. */
 export function watchAllMechanics(max = 100, cb: (items: MechanicProfile[]) => void, onError?: (err: Error) => void): Unsubscribe | null {
+  if (isDemo()) { queueMicrotask(() => cb(DEMO_MECHANICS.slice(0, max))); return null; }
   try {
     const d = requireDb();
     return onSnapshot(
@@ -76,6 +79,7 @@ export async function upsertMechanic(profile: MechanicProfile): Promise<boolean>
 }
 
 export async function listAllRequests(max = 200): Promise<ServiceRequest[]> {
+  if (isDemo()) return DEMO_REQUESTS.slice(0, max);
   try {
     const d = requireDb();
     const snap = await getDocs(query(collection(d, 'requests'), orderBy('createdAt', 'desc'), limit(max)));
@@ -85,6 +89,7 @@ export async function listAllRequests(max = 200): Promise<ServiceRequest[]> {
 
 /** Realtime variant: streams every request as it changes. */
 export function watchAllRequests(max = 200, cb: (items: ServiceRequest[]) => void, onError?: (err: Error) => void): Unsubscribe | null {
+  if (isDemo()) { queueMicrotask(() => cb(DEMO_REQUESTS.slice(0, max))); return null; }
   try {
     const d = requireDb();
     return onSnapshot(
@@ -96,14 +101,24 @@ export function watchAllRequests(max = 200, cb: (items: ServiceRequest[]) => voi
 }
 
 export async function cancelRequest(id: string): Promise<boolean> {
+  // Batch 7 race guard: never flip a terminal job. A completed job carries
+  // revenue/rating history; cancelling it would corrupt both.
   try {
     const d = requireDb();
-    await updateDoc(doc(d, 'requests', id), { status: 'cancelled', updatedAt: serverTimestamp() });
-    return true;
+    return await runTransaction(d, async (tx) => {
+      const ref = doc(d, 'requests', id);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return false;
+      const st = (snap.data() as ServiceRequest).status;
+      if (st === 'completed' || st === 'cancelled') return false;
+      tx.update(ref, { status: 'cancelled', updatedAt: serverTimestamp() });
+      return true;
+    });
   } catch { return false; }
 }
 
 export async function listUsers(max = 200): Promise<UserSummary[]> {
+  if (isDemo()) return DEMO_USERS.slice(0, max);
   try {
     const d = requireDb();
     const snap = await getDocs(query(collection(d, 'users'), limit(max)));
@@ -113,6 +128,7 @@ export async function listUsers(max = 200): Promise<UserSummary[]> {
 
 /** Realtime variant: streams users as they change. */
 export function watchUsers(max = 200, cb: (items: UserSummary[]) => void, onError?: (err: Error) => void): Unsubscribe | null {
+  if (isDemo()) { queueMicrotask(() => cb(DEMO_USERS.slice(0, max))); return null; }
   try {
     const d = requireDb();
     return onSnapshot(
@@ -279,10 +295,25 @@ export type OpsStats = {
   avgEtaMin: number | null;
   completedRevenueCents: number | null;
   avgDurationMin: number | null;
+  /** status == 'requested' with no mechanic assigned — needs dispatch. */
+  unassignedRequested: number;
+  /** status == 'requested' whose offerExpiresAt is already past. */
+  expiredOffers: number;
 };
 
 /** Aggregate operational stats from requests (real data; capped read). */
 export async function getOpsStats(max = 200): Promise<OpsStats> {
+  if (isDemo()) {
+    const rows = DEMO_REQUESTS.slice(0, max);
+    const byStatus: Record<string, number> = {};
+    const byCategory: Record<string, number> = {};
+    for (const r of rows) {
+      byStatus[r.status] = (byStatus[r.status] ?? 0) + 1;
+      const c = r.problemCategory ?? 'other';
+      byCategory[c] = (byCategory[c] ?? 0) + 1;
+    }
+    return { total: rows.length, byStatus, byCategory, avgEtaMin: 15, completedRevenueCents: 149900, avgDurationMin: 42, unassignedRequested: 0, expiredOffers: 0 };
+  }
   try {
     const d = requireDb();
     const snap = await getDocs(query(collection(d, 'requests'), orderBy('createdAt', 'desc'), limit(max)));
@@ -293,11 +324,16 @@ export async function getOpsStats(max = 200): Promise<OpsStats> {
     let etaSum = 0; let etaN = 0;
     let revSum = 0; let revN = 0;
     let durSum = 0; let durN = 0;
+    let unassigned = 0;
+    let expired = 0;
+    const now = Date.now();
     for (const r of rows) {
       const st = (r.status ?? 'unknown') as string;
       byStatus[st] = (byStatus[st] ?? 0) + 1;
       const cat = (r.problemCategory ?? 'other') as string;
       byCategory[cat] = (byCategory[cat] ?? 0) + 1;
+      if (st === 'requested' && !(r as ServiceRequest).mechanicId) unassigned += 1;
+      if (st === 'requested' && typeof r.offerExpiresAt === 'number' && r.offerExpiresAt < now) expired += 1;
       if (typeof r.etaMin === 'number' && Number.isFinite(r.etaMin)) { etaSum += r.etaMin; etaN++; }
       if (typeof (r as ServiceRequest).amountCents === 'number' && Number.isFinite((r as ServiceRequest).amountCents!)) { revSum += (r as ServiceRequest).amountCents!; revN++; }
       if (typeof (r as ServiceRequest).durationMin === 'number' && Number.isFinite((r as ServiceRequest).durationMin!)) { durSum += (r as ServiceRequest).durationMin!; durN++; }
@@ -309,9 +345,11 @@ export async function getOpsStats(max = 200): Promise<OpsStats> {
       avgEtaMin: etaN ? Math.round((etaSum / etaN) * 10) / 10 : null,
       completedRevenueCents: revN ? revSum : null,
       avgDurationMin: durN ? Math.round((durSum / durN) * 10) / 10 : null,
+      unassignedRequested: unassigned,
+      expiredOffers: expired,
     };
   } catch {
-    return { total: 0, byStatus: {}, byCategory: {}, avgEtaMin: null, completedRevenueCents: null, avgDurationMin: null };
+    return { total: 0, byStatus: {}, byCategory: {}, avgEtaMin: null, completedRevenueCents: null, avgDurationMin: null, unassignedRequested: 0, expiredOffers: 0 };
   }
 }
 
@@ -328,6 +366,34 @@ export function toCsv(rows: ServiceRequest[]): string {
     new Date(r.createdAt).toISOString(), new Date(r.updatedAt).toISOString(),
     r.etaMin ?? '', r.amountCents ?? '', r.durationMin ?? '', r.rating ?? '',
   ].map(esc).join(','));
+  return [header, ...lines].join('\n');
+}
+
+/** Serialise the mechanic roster as CSV — public fields only, never private contact. */
+export function mechanicsToCsv(rows: MechanicProfile[]): string {
+  const esc = (v: unknown): string => {
+    const s = v == null ? '' : String(v);
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const header = ['id', 'name', 'approved', 'verificationStatus', 'isAvailable', 'specialties', 'rating', 'reviewCount'].map(esc).join(',');
+  const lines = rows.map((m) => [
+    m.id, m.name ?? '', m.approved, m.verificationStatus ?? '',
+    m.isAvailable, (m.specialties ?? []).join('; '),
+    m.rating ?? '', m.reviewCount ?? '',
+  ].map(esc).join(','));
+  return [header, ...lines].join('\n');
+}
+
+/** Serialise user summaries as CSV (admin-only data, admin-only export). */
+export function usersToCsv(rows: UserSummary[]): string {
+  const esc = (v: unknown): string => {
+    const s = v == null ? '' : String(v);
+    if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+  const header = ['id', 'email', 'displayName', 'role'].map(esc).join(',');
+  const lines = rows.map((u) => [u.id, u.email ?? '', u.displayName ?? '', u.role ?? ''].map(esc).join(','));
   return [header, ...lines].join('\n');
 }
 
@@ -354,6 +420,10 @@ export function downloadTextFile(filename: string, content: string, mime = 'text
 
 /** Realtime stats: re-emits whenever any of the three collections changes. */
 export function watchStats(cb: (s: { requests: number; mechanics: number; users: number }) => void, onError?: (err: Error) => void): Unsubscribe | null {
+  if (isDemo()) {
+    queueMicrotask(() => cb({ requests: DEMO_REQUESTS.filter((r) => r.status === 'requested').length, mechanics: DEMO_MECHANICS.length, users: DEMO_USERS.length }));
+    return null;
+  }
   try {
     const d = requireDb();
     // Per-collection cache. We only re-fetch the collection whose snapshot

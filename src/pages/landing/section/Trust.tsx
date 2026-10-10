@@ -56,7 +56,7 @@ export function Trust() {
           hue="azure"
           eyebrow={<><Lock size={13} aria-hidden /> Assurance & how the app works</>}
           title={<>Trust, built in <span className="text-gradient-signal">verifiable layers.</span></>}
-          description="What MECHIST actually does with your request, location and mechanic assignment — no invented guarantees, just the real behavior you can verify in the app."
+          description="What RoadAssisst actually does with your request, location and mechanic assignment — no invented guarantees, just the real behavior you can verify in the app."
           actions={
             <Badge tone="neutral" size="md">
               illustrated · live on /map &amp; /mechanics

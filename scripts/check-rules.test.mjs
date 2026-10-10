@@ -43,7 +43,7 @@ describe('check-rules.mjs — Phase 9 invariants', () => {
     expect(existsSync(linter)).toBe(true);
   });
 
-  it('real firestore.rules passes 13/13', () => {
+  it('real firestore.rules passes 31/31', () => {
     if (!existsSync(rulesFile)) {
       throw new Error(`firestore.rules not found at ${rulesFile}`);
     }
@@ -53,24 +53,23 @@ describe('check-rules.mjs — Phase 9 invariants', () => {
         `linter exited ${res.status}\n--- stdout ---\n${res.stdout}\n--- stderr ---\n${res.stderr}`,
       );
     }
-    expect(res.stdout).toMatch(/16\/16 checks passed/);
-    for (let i = 1; i <= 16; i++) {
+    expect(res.stdout).toMatch(/31\/31 checks passed/);
+    for (let i = 1; i <= 31; i++) {
       const id = `R${String(i).padStart(3, '0')}`;
       expect(res.stdout).toContain(`OK    ${id}`);
     }
   });
 
 it('a deliberately broken rules file fails the linter', () => {
-    // Strip the two most-recently-added Phase 9 invariants: offer-expiry
-    // (R009) and the affected-keys allowlist (R010). The linter should
-    // flag exactly those.
-    // Target the FIRST-ASSIGNMENT branch (the last branch before admin) which
-    // has the offerExpiresAt check and the specific hasOnly keys.
+    // Strip the offer-window time checks (accept + release branches) and
+    // the first-assignment affected-keys allowlist. The linter should flag
+    // R009 (expiry check), R010 (5-key allowlist) and R026 (release window).
     const real = readFileSync(rulesFile, 'utf8');
     const broken = real
-      // Remove the offerExpiresAt check AND the hasOnly keys from the first-assignment branch
+      .split('&& request.time < request.resource.data.offerExpiresAt')
+      .join('&& true /* stripped-for-negative-test */')
       .replace(
-        /&& request\.resource\.data\.offerExpiresAt is number\r?\n\s*&& request\.time < request\.resource\.data\.offerExpiresAt\r?\n\s*&& request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\r?\n\s*\.hasOnly\(\['status',\s*'mechanicId',\s*'mechanicName',\r?\n\s*'etaMin',\s*'updatedAt'\]\)/,
+        /&& request\.resource\.data\.diff\(resource\.data\)\.affectedKeys\(\)\r?\n\s*\.hasOnly\(\['status',\s*'mechanicId',\s*'mechanicName',\r?\n\s*'etaMin',\s*'updatedAt'\]\)/,
         "&& request.resource.data.diff(resource.data).affectedKeys()\n              .hasOnly([])"
       );
 
@@ -84,6 +83,7 @@ it('a deliberately broken rules file fails the linter', () => {
       expect(res.status).not.toBe(0);
       expect(res.stdout).toMatch(/FAIL  R009/);
       expect(res.stdout).toMatch(/FAIL  R010/);
+      expect(res.stdout).toMatch(/FAIL  R026/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

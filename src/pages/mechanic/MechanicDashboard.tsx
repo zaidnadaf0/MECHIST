@@ -1,21 +1,19 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Activity, ArrowRight, Check, CircleAlert, Clock, MapPin, Power, Star, Wrench, X, XCircle } from 'lucide-react';
-import { Badge, Button, Card, IconTile, Progress, Sparkbars, Stat, useToast, Modal, Textarea } from '@/components/ui';
+import { Activity, ArrowRight, Check, CircleAlert, Clock, MapPin, Star, Wrench, X } from 'lucide-react';
+import { Badge, Button, Card, IconTile, OpsStatCard, CountdownRing, Progress, Sparkbars, Stat, useToast, Modal, Textarea } from '@/components/ui';
 import { EmptyState, ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn, PageTransition } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
 import {
-  watchIncoming, getMechanicProfile, setAvailability, acceptJob, listActiveJob, listCompletedJobs,
+  watchIncoming, getMechanicProfile, getMechanicContact, setAvailability, acceptJob, listActiveJob, listCompletedJobs,
   declineOffer, type MechanicProfile,
 } from '@/lib/mechanic';
 import type { ServiceRequest } from '@/lib/customer';
-import { inr, verificationUi, type VerificationStatus } from '@/lib/authUI';
-
-/** Dispatch offers stay hot for two minutes before they read as stale. */
-const OFFER_WINDOW_MS = 120_000;
-/** Standard call-out fee used for the shift estimate until settlement lands. */
-const CALLOUT_FEE = 45;
+import { OFFER_WINDOW_MS } from '@/lib/customer';
+import { money, offerDeadlineMs, formatCountdownMs } from '@/lib/format';
+import { distanceKm } from '@/lib/geo';
+import { verificationUi, type VerificationStatus } from '@/lib/authUI';
 
 const STAGE_LABEL: Record<ServiceRequest['status'], string> = {
   requested: 'Requested', accepted: 'Accepted', 'on-the-way': 'On the way',
@@ -24,16 +22,13 @@ const STAGE_LABEL: Record<ServiceRequest['status'], string> = {
 
 const DAY = 86_400_000;
 const startOfDay = (t: number) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
-const clock = (ms: number) => {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-};
 
 export function MechanicDashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const [profile, setProfile] = useState<MechanicProfile | null | 'loading'>('loading');
+  const [contactPhone, setContactPhone] = useState<string | null>(null);
   const [incoming, setIncoming] = useState<ServiceRequest[]>([]);
   const [active, setActive] = useState<ServiceRequest | null>(null);
   const [history, setHistory] = useState<ServiceRequest[]>([]);
@@ -42,26 +37,36 @@ export function MechanicDashboard() {
   const [busyAvail, setBusyAvail] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [declining, setDeclining] = useState<{ jobId: string; reason: string } | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
     let cancelled = false;
     let unsub: (() => void) | null = null;
     (async () => {
-      const [p, aRes, hRes] = await Promise.all([
+      const [p, c, aRes, hRes] = await Promise.all([
         getMechanicProfile(user.uid),
+        getMechanicContact(user.uid),
         listActiveJob(user.uid),
         listCompletedJobs(user.uid, 30),
       ]);
       if (cancelled) return;
       setProfile(p);
+      setContactPhone(c?.phone ?? null);
       setActive(aRes.data ?? null);
       setHistory(hRes.data ?? []);
       if (aRes.error) console.warn("[MechanicDashboard] listActiveJob failed:", aRes.error);
-      if (hRes.error) console.warn("[MechanicDashboard] listCompletedJobs failed:", hRes.error);
+      if (hRes.error) {
+        console.warn("[MechanicDashboard] listCompletedJobs failed:", hRes.error);
+        if (!cancelled) setHistoryError(hRes.error.message);
+      }
       unsub = watchIncoming((jobs) => {
-        if (!cancelled) setIncoming(jobs);
-      }, undefined, user.uid);
+        if (!cancelled) { setIncoming(jobs); setQueueError(null); }
+      }, (err) => {
+        console.warn("[MechanicDashboard] watchIncoming failed:", err);
+        if (!cancelled) setQueueError(err.message);
+      }, user.uid);
     })();
     return () => {
       cancelled = true;
@@ -69,18 +74,18 @@ export function MechanicDashboard() {
     };
   }, [user, navigate]);
 
+  // Display-only 1s ticker for the offer countdowns. Gated on a
+  // non-empty queue so the page idles when there is nothing to count
+  // down; always cleaned up. Never decides eligibility — acceptJob and
+  // the scheduled server expiry own that.
   useEffect(() => {
+    if (incoming.length === 0) return;
     const t = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(t);
-  }, []);
+  }, [incoming.length]);
 
   const loaded = profile !== 'loading' && profile !== null ? profile : null;
   const available = Boolean(loaded?.isAvailable);
-  // Verification state — once the mechanic is approved, the banner
-  // becomes a quiet confirmation rather than a gate. While not
-  // approved, `canAcceptJobs === false` and the Accept button on
-  // every offer is disabled, so the mechanic can browse but not
-  // commit to a job.
   const status: VerificationStatus | null = loaded?.verificationStatus ?? null;
   const verif = verificationUi(status);
   const offers = useMemo(() => incoming.filter((j) => !dismissed.includes(j.id)), [incoming, dismissed]);
@@ -97,14 +102,26 @@ export function MechanicDashboard() {
   }, [history]);
 
   const todayCount = week[6]?.count ?? 0;
+  const { settledTotal, settledCount } = useMemo(() => {
+    let total = 0;
+    let count = 0;
+    for (const h of history) {
+      if (typeof h.amountCents === 'number' && Number.isFinite(h.amountCents)) {
+        total += h.amountCents;
+        count += 1;
+      }
+    }
+    return { settledTotal: total / 100, settledCount: count };
+  }, [history]);
   const completeness = useMemo(() => {
     if (!loaded) return 0;
+    const hasPhone = Boolean(contactPhone ?? loaded.phone);
     const checks = [
-      Boolean(loaded.name), Boolean(loaded.phone), Boolean(loaded.vehicleDescription),
+      Boolean(loaded.name), hasPhone, Boolean(loaded.vehicleDescription),
       loaded.specialties.length > 0, loaded.baseLat != null && loaded.baseLng != null, loaded.approved,
     ];
     return Math.round((checks.filter(Boolean).length / checks.length) * 100);
-  }, [loaded]);
+  }, [loaded, contactPhone]);
 
   if (!user) return null;
 
@@ -117,20 +134,18 @@ export function MechanicDashboard() {
     if (ok) {
       setProfile({ ...loaded, isAvailable: next });
       toast.push({ title: next ? 'You are available' : 'You are offline', tone: next ? 'success' : 'info' });
+    } else {
+      toast.push({ title: 'Could not update availability', description: 'Check your connection and try again.', tone: 'danger' });
     }
   };
 
   const onAccept = async (job: ServiceRequest) => {
     if (!loaded) return;
     if (!verif.canAcceptJobs) {
-      // Belt-and-braces: the OfferCard Accept button is also disabled,
-      // but a tap on the card body could theoretically bubble here.
       toast.push({ title: 'Verification required', description: verif.bannerTitle, tone: 'info' });
       return;
     }
     setAccepting(job.id);
-    // Server-authoritative check: an offer older than OFFER_WINDOW_MS
-    // is treated as expired without ever calling Firestore.
     if (job.offerExpiresAt != null && job.offerExpiresAt < now) {
       setAccepting(null);
       setDismissed((d) => d.includes(job.id) ? d : [...d, job.id]);
@@ -195,8 +210,18 @@ export function MechanicDashboard() {
   return (
     <>
       <PageTransition>
-        <div className="container section-compact">
+        <div className="container section-compact flex flex-col gap-6">
           <FadeIn>
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h1 className="display text-display-md text-fg-app">Dashboard</h1>
+                <p className="mt-1 text-small text-fg-muted">
+                  {loaded ? (loaded.garageName ?? loaded.name) : 'Mechanic console'}
+                </p>
+              </div>
+            </div>
+          </FadeIn>
+
           {loaded && status && (
             <VerificationBanner
               tone={verif.badgeTone}
@@ -206,51 +231,40 @@ export function MechanicDashboard() {
             />
           )}
 
-          <header className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <span aria-hidden className="h-px w-8 bg-gradient-to-r from-aqua-500 to-transparent" />
-                <span className="eyebrow">Mechanic portal</span>
+          {/* ---------- Availability ---------- */}
+          <FadeIn>
+            <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-success-500/25 bg-success-500/[0.07] p-4 sm:p-5">
+              <span aria-hidden className="grid h-11 w-11 place-items-center rounded-xl bg-success-500/15 text-success-500">
+                <Activity size={20} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-body font-bold text-fg-app">{available ? "You're online" : "You're offline"}</div>
+                <p className="mt-0.5 text-small text-fg-muted">
+                  {available
+                    ? 'Nearby requests will be offered to you.'
+                    : 'Hidden from the live queue.'}
+                  {!verif.canAcceptJobs && ' Availability has no effect until your application is approved.'}
+                </p>
               </div>
-              <h1 className="mt-3 display text-display-md text-fg-app">
-                {loaded ? `Welcome, ${loaded.name}` : 'Welcome.'}
-              </h1>
-              <p className="mt-2 max-w-xl text-small text-fg-muted text-pretty">
-                Live dispatch, job stages and shift totals. Go online to receive jobs — availability toggles your presence in the queue. Offers expire after two minutes; GPS is throttled 25&nbsp;m&nbsp;/&nbsp;5&nbsp;s and shared only after you accept.
-              </p>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={available}
+                aria-label={available ? 'Go offline' : 'Go available'}
+                disabled={!loaded || busyAvail}
+                onClick={toggleAvail}
+                className={'relative h-8 w-14 shrink-0 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-success-400 disabled:opacity-60 ' + (available ? 'bg-success-500' : 'bg-hair/[0.2]')}
+              >
+                <span aria-hidden className={'absolute top-1 h-6 w-6 rounded-full bg-white shadow transition-all ' + (available ? 'left-7' : 'left-1')} />
+              </button>
             </div>
+          </FadeIn>
 
-            <Card tone="aqua" flush className="w-full lg:max-w-sm">
-              <div className="flex items-center gap-4 p-4">
-                <IconTile icon={<Power size={18} />} hue={available ? 'aqua' : 'neutral'} />
-                <div className="min-w-0 flex-1">
-                  <Badge tone={available ? 'aqua' : 'neutral'} live={available} dot={!available}>
-                    {available ? 'Available' : 'Offline'}
-                  </Badge>
-                  <p className="mt-1.5 text-xs text-fg-muted">
-                    {available ? 'Receiving dispatch in real time.' : 'Hidden from the live queue.'}
-                  </p>
-                </div>
-                <Button
-                  variant={available ? 'secondary' : 'live'}
-                  size="sm"
-                  loading={busyAvail}
-                  onClick={toggleAvail}
-                  disabled={!loaded}
-                >
-                  {available ? 'Go offline' : 'Go available'}
-                </Button>
-              </div>
-            </Card>
-          </header>
-        </FadeIn>
+          <p aria-live="polite" className="sr-only">
+            {loaded ? (available ? 'You are available for dispatch.' : 'You are offline.') : 'Loading profile.'}
+          </p>
 
-        <p aria-live="polite" className="sr-only">
-          {loaded ? (available ? 'You are available for dispatch.' : 'You are offline.') : 'Loading profile.'}
-        </p>
-
-        {profile === null && (
-          <div className="mt-8">
+          {profile === null && (
             <ErrorState
               kind="empty-results"
               title="No mechanic profile yet"
@@ -258,109 +272,97 @@ export function MechanicDashboard() {
               retryLabel="Refresh"
               onRetry={() => location.reload()}
             />
-          </div>
-        )}
-
-        {/* ── shift metrics ─────────────────────────────────────────── */}
-        <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {profile === 'loading' ? (
-            Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-28" />)
-          ) : (
-            <>
-              <Card tone="aqua">
-                <Stat label="Live offers" value={offers.length} hue="aqua" size="sm" icon={<Activity size={14} />} />
-                <p className="mt-3 text-xs text-fg-subtle">{available ? 'Queue is streaming.' : 'Go available to receive offers.'}</p>
-              </Card>
-              <Card>
-                <Stat label="Completed today" value={todayCount} hue="azure" size="sm" icon={<Check size={14} />} />
-                <Sparkbars className="mt-3" values={week.map((w) => w.count)} hue="azure" height={28} />
-              </Card>
-              <Card tone="gold">
-                <Stat
-                  label="Earnings today (est.)"
-                  value={inr(todayCount * CALLOUT_FEE)}
-                  hue="gold"
-                  size="sm"
-                  icon={<Wrench size={14} />}
-                />
-                <p className="mt-3 text-xs text-fg-subtle">
-                  {inr(history.length * CALLOUT_FEE)} across last {history.length} jobs · settles nightly.
-                </p>
-              </Card>
-              <Card tone="gold">
-                <Stat
-                  label="Rating"
-                  value={loaded?.rating != null ? loaded.rating.toFixed(1) : '—'}
-                  unit="/5"
-                  hue="gold"
-                  size="sm"
-                  icon={<Star size={14} />}
-                />
-                <p className="mt-3 text-xs text-fg-subtle">{loaded?.reviewCount ?? 0} customer reviews</p>
-              </Card>
-            </>
           )}
-        </div>
 
-        <div className="mt-10 grid gap-6 lg:grid-cols-3">
-          {/* ── dispatch column ───────────────────────────────────── */}
-          <div className="lg:col-span-2">
-            <section aria-labelledby="active-job">
-              <div className="flex items-end justify-between gap-3">
-                <h2 id="active-job" className="text-h2 text-fg-app">Active job</h2>
-                {active && <Badge tone="aqua" live>{STAGE_LABEL[active.status]}</Badge>}
+          {/* ---------- Active job ---------- */}
+          <section aria-labelledby="active-job">
+            {active ? (
+              <div className="overflow-hidden rounded-2xl border border-line-soft bg-gradient-to-br from-azure-900 via-[#16233f] to-surface-1 p-5 sm:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <Badge tone="warning" size="sm" dot>{STAGE_LABEL[active.status].toUpperCase()}</Badge>
+                    <div className="mt-2 display text-h1 font-bold text-white text-balance">
+                      {active.problemCategory ?? 'Service request'}
+                    </div>
+                    <p className="mt-1 max-w-lg text-small text-white/70 line-clamp-2">{active.problemText}</p>
+                    <div className="mt-1 font-mono text-xs text-white/50">#{active.id.slice(-6).toUpperCase()}</div>
+                  </div>
+                  {typeof active.amountCents === 'number' && (
+                    <div className="text-right">
+                      <div className="stat-num text-display-sm font-bold text-white tabular-nums">{money(active.amountCents / 100)}</div>
+                      <div className="text-xs text-white/60">recorded amount</div>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <Button variant="primary" size="md" rightIcon={<ArrowRight size={15} />} onClick={() => navigate(`/mechanic/job/${active.id}`)}>
+                    Open active job
+                  </Button>
+                </div>
+                <div className="mt-4 grid gap-3 border-t border-white/10 pt-4 text-xs sm:grid-cols-3">
+                  <Meta icon={<MapPin size={13} />} label="Location" value={`${active.customerLat.toFixed(4)}, ${active.customerLng.toFixed(4)}`} light />
+                  <Meta icon={<Clock size={13} />} label="ETA given" value={active.etaMin != null ? `${active.etaMin} min` : '—'} light />
+                  <Meta icon={<Activity size={13} />} label="Updated" value={new Date(active.updatedAt).toLocaleTimeString()} light />
+                </div>
               </div>
-              <div className="mt-3">
-                {active ? (
-                  <Card tone="aqua" interactive onClick={() => navigate(`/mechanic/job/${active.id}`)}>
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <div className="font-mono text-xs text-fg-subtle">#{active.id.slice(-6).toUpperCase()}</div>
-                        <div className="mt-1 display text-h3 text-fg-app">
-                          {active.problemCategory ?? 'Service request'}
-                        </div>
-                        <p className="mt-1 max-w-lg text-small text-fg-muted line-clamp-2">{active.problemText}</p>
-                      </div>
-                      <Button
-                        variant="live"
-                        size="sm"
-                        rightIcon={<ArrowRight size={15} />}
-                        onClick={(e) => { e.stopPropagation(); navigate(`/mechanic/job/${active.id}`); }}
-                      >
-                        Open job
-                      </Button>
-                    </div>
-                    <div className="mt-4 grid gap-3 border-t border-line-soft pt-4 text-xs sm:grid-cols-3">
-                      <Meta icon={<MapPin size={13} />} label="Location" value={`${active.customerLat.toFixed(4)}, ${active.customerLng.toFixed(4)}`} />
-                      <Meta icon={<Clock size={13} />} label="ETA given" value={active.etaMin != null ? `${active.etaMin} min` : '—'} />
-                      <Meta icon={<Activity size={13} />} label="Updated" value={new Date(active.updatedAt).toLocaleTimeString()} />
-                    </div>
-                  </Card>
-                ) : (
-                  <EmptyState kind="incoming" title="No active job" description="Accept an offer from the dispatch queue to get started." />
+            ) : (
+              <EmptyState kind="incoming" title="No active job" description="Accept an offer from the dispatch queue to get started." />
+            )}
+          </section>
+
+          {/* ---------- Shift metrics ---------- */}
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {profile === 'loading' ? (
+              Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-36" />)
+            ) : (
+              <>
+                <OpsStatCard icon={<Activity size={18} />} label="Live offers" tone="aqua" value={offers.length} sub={available ? 'queue is streaming' : 'go available to receive offers'} />
+                <OpsStatCard icon={<Check size={18} />} label="Jobs today" tone="azure" value={todayCount} sub="completed call-outs" />
+                <OpsStatCard
+                  icon={<Wrench size={18} />} label="Settled revenue" tone="gold"
+                  value={money(settledTotal)}
+                  sub={settledCount === 0 ? `no settled amounts in last ${history.length}` : `${settledCount} of last ${history.length} recorded`}
+                />
+                <OpsStatCard
+                  icon={<Star size={18} />} label="Avg rating" tone="gold"
+                  value={loaded?.rating != null ? loaded.rating.toFixed(2) : '—'}
+                  sub={`${loaded?.reviewCount ?? 0} customer reviews`}
+                />
+              </>
+            )}
+          </div>
+
+          {/* ---------- Dispatch queue ---------- */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <section aria-labelledby="dispatch-queue">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <h2 id="dispatch-queue" className="display text-h2 text-fg-app">Incoming requests</h2>
+                  <span className="font-mono text-xs text-fg-subtle">
+                    {offers.length} open · updated {new Date(now).toLocaleTimeString()}
+                  </span>
+                </div>
+                <p aria-live="polite" className="sr-only">{offers.length} job offers waiting.</p>
+                {queueError && offers.length === 0 && (
+                  <div className="mt-3">
+                    <ErrorState kind="api" title="Queue unavailable" description={queueError} retryLabel="Retry" onRetry={() => location.reload()} />
+                  </div>
                 )}
-              </div>
-            </section>
-
-            <section className="mt-10" aria-labelledby="dispatch-queue">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <h2 id="dispatch-queue" className="text-h2 text-fg-app">Dispatch queue</h2>
-                <span className="font-mono text-xs text-fg-subtle">
-                  {offers.length} open · updated {new Date(now).toLocaleTimeString()}
-                </span>
-              </div>
-              <p aria-live="polite" className="sr-only">{offers.length} job offers waiting.</p>
-              <ul className="mt-3 grid gap-3">
-{offers.length === 0 ? (
-                    <li>
-                      <EmptyState compact kind="incoming" title="Queue is quiet" description="New jobs appear here in realtime the moment a customer requests help." />
-                    </li>
+                <ul className="mt-3 grid gap-3">
+                  {offers.length === 0 ? (
+                    !queueError && (
+                      <li>
+                        <EmptyState compact kind="incoming" title="Queue is quiet" description="New jobs appear here in realtime the moment a customer requests help." />
+                      </li>
+                    )
                   ) : (
                     offers.map((j) => (
                       <OfferCard
                         key={j.id}
                         job={j}
                         now={now}
+                        baseLat={loaded?.baseLat}
+                        baseLng={loaded?.baseLng}
                         accepting={accepting === j.id}
                         disabled={Boolean(accepting) || !loaded || !verif.canAcceptJobs}
                         blockReason={!verif.canAcceptJobs ? verif.bannerTitle : undefined}
@@ -370,45 +372,48 @@ export function MechanicDashboard() {
                       />
                     ))
                   )}
-              </ul>
-            </section>
+                </ul>
+              </section>
+            </div>
+
+            {/* ---------- Shift rail ---------- */}
+            <aside className="space-y-6">
+              <Card eyebrow="This week" title="Completed per day">
+                <Sparkbars values={week.map((w) => w.count)} hue="aqua" height={64} />
+                <div className="mt-2 flex justify-between font-mono text-[10px] text-fg-subtle">
+                  {week.map((w, i) => <span key={i}>{w.day}</span>)}
+                </div>
+                <div className="mt-4 border-t border-line-soft pt-4">
+                  <Stat
+                    label="Completed · 7 days"
+                    value={week.reduce((a, w) => a + w.count, 0)}
+                    hue="aqua"
+                    size="sm"
+                  />
+                  {historyError && (
+                    <p role="status" className="mt-2 text-xs text-warning-600">Shift totals may be stale — history failed to load.</p>
+                  )}
+                </div>
+              </Card>
+
+              <Card eyebrow="Readiness" title="Profile completeness">
+                <Progress value={completeness} hue={completeness >= 80 ? 'aqua' : 'gold'} showValue label="Verified fields" />
+                <ul className="mt-4 space-y-2 text-xs">
+                  <Ready ok={Boolean(loaded?.approved)} label="Approved by admin" />
+                  <Ready ok={Boolean(contactPhone ?? loaded?.phone)} label="Contact number on file" />
+                  <Ready ok={Boolean(loaded?.vehicleDescription)} label="Service vehicle described" />
+                  <Ready ok={Boolean(loaded && loaded.specialties.length > 0)} label="Specialties listed" />
+                  <Ready ok={Boolean(loaded && loaded.baseLat != null && loaded.baseLng != null)} label="Coverage base set" />
+                </ul>
+                <div className="mt-5 flex flex-wrap gap-2 border-t border-line-soft pt-4">
+                  <Link to="/mechanic/profile"><Button variant="secondary" size="sm">Edit profile</Button></Link>
+                  <Link to="/mechanic/history"><Button variant="ghost" size="sm" rightIcon={<ArrowRight size={14} />}>History</Button></Link>
+                </div>
+              </Card>
+            </aside>
           </div>
-
-          {/* ── shift rail ────────────────────────────────────────── */}
-          <aside className="space-y-6">
-            <Card eyebrow="This week" title="Completed per day">
-              <Sparkbars values={week.map((w) => w.count)} hue="aqua" height={64} />
-              <div className="mt-2 flex justify-between font-mono text-[10px] text-fg-subtle">
-                {week.map((w, i) => <span key={i}>{w.day}</span>)}
-              </div>
-              <div className="mt-4 border-t border-line-soft pt-4">
-                <Stat
-                  label="Completed · 7 days"
-                  value={week.reduce((a, w) => a + w.count, 0)}
-                  hue="aqua"
-                  size="sm"
-                />
-              </div>
-            </Card>
-
-            <Card eyebrow="Readiness" title="Profile completeness">
-              <Progress value={completeness} hue={completeness >= 80 ? 'aqua' : 'gold'} showValue label="Verified fields" />
-              <ul className="mt-4 space-y-2 text-xs">
-                <Ready ok={Boolean(loaded?.approved)} label="Approved by admin" />
-                <Ready ok={Boolean(loaded?.phone)} label="Contact number on file" />
-                <Ready ok={Boolean(loaded?.vehicleDescription)} label="Service vehicle described" />
-                <Ready ok={Boolean(loaded && loaded.specialties.length > 0)} label="Specialties listed" />
-                <Ready ok={Boolean(loaded && loaded.baseLat != null && loaded.baseLng != null)} label="Coverage base set" />
-              </ul>
-              <div className="mt-5 flex flex-wrap gap-2 border-t border-line-soft pt-4">
-                <Link to="/mechanic/profile"><Button variant="secondary" size="sm">Edit profile</Button></Link>
-                <Link to="/mechanic/history"><Button variant="ghost" size="sm" rightIcon={<ArrowRight size={14} />}>History</Button></Link>
-              </div>
-            </Card>
-          </aside>
         </div>
-      </div>
-    </PageTransition>
+      </PageTransition>
       <DeclineModal
         open={!!declining}
         onClose={() => setDeclining(null)}
@@ -421,13 +426,13 @@ export function MechanicDashboard() {
   );
 }
 
-/* ── pieces ─────────────────────────────────────────────────────── */
-
 function OfferCard({
-  job, now, accepting, disabled, blockReason, onAccept, onDismiss, onDecline,
+  job, now, baseLat, baseLng, accepting, disabled, blockReason, onAccept, onDismiss, onDecline,
 }: {
   job: ServiceRequest;
   now: number;
+  baseLat?: number | null;
+  baseLng?: number | null;
   accepting: boolean;
   disabled: boolean;
   blockReason?: string;
@@ -435,59 +440,55 @@ function OfferCard({
   onDismiss: () => void;
   onDecline: () => void;
 }) {
-  const left = Math.max(0, OFFER_WINDOW_MS - (now - job.createdAt));
-  const pct = (left / OFFER_WINDOW_MS) * 100;
-  const urgent = left < 30_000;
+  // Display deadline comes from the persisted server timestamp, not
+  // createdAt: a released job gets a fresh offerExpiresAt while createdAt
+  // stays put, so createdAt-based math would read "Expired" on a live offer.
+  const left = Math.max(0, offerDeadlineMs(job, OFFER_WINDOW_MS) - now);
+  const urgent = left > 0 && left < 30_000;
+  const kmAway = baseLat != null && baseLng != null
+    ? distanceKm({ lat: baseLat, lng: baseLng }, { lat: job.customerLat, lng: job.customerLng })
+    : null;
 
   return (
     <li>
-      <Card tone={urgent ? 'gold' : 'aqua'}>
+      <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={urgent ? 'gold' : 'aqua'} live={!urgent} dot={urgent}>
-                {left === 0 ? 'Overdue' : urgent ? 'Expiring' : 'New offer'}
-              </Badge>
-              <span className="font-mono text-xs text-fg-subtle">#{job.id.slice(-6).toUpperCase()}</span>
-            </div>
-            <div className="mt-2 text-body font-medium text-fg-app">{job.problemCategory ?? 'Service request'}</div>
-            <p className="mt-0.5 max-w-xl text-small text-fg-muted line-clamp-2">{job.problemText}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-fg-subtle">
-              <span className="inline-flex items-center gap-1"><MapPin size={14} strokeWidth={2} aria-hidden />{job.customerLat.toFixed(4)}, {job.customerLng.toFixed(4)}</span>
-              <span className="inline-flex items-center gap-1"><Clock size={14} strokeWidth={2} aria-hidden />{new Date(job.createdAt).toLocaleTimeString()}</span>
+          <div className="flex min-w-0 items-start gap-3">
+            <IconTile icon={<Wrench size={18} />} hue="aqua" size="md" />
+            <div className="min-w-0">
+              <div className="text-body font-bold text-fg-app">{job.problemCategory ?? 'Service request'}</div>
+              <p className="mt-0.5 max-w-xl text-small text-fg-muted line-clamp-2">{job.problemText}</p>
+              <div className="mt-1 font-mono text-[11px] text-fg-subtle">#{job.id.slice(-6).toUpperCase()} · {new Date(job.createdAt).toLocaleTimeString()}</div>
             </div>
           </div>
-
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <div className={'stat-num text-h2 ' + (urgent ? 'text-gold-500' : 'text-aqua-500')}>{clock(left)}</div>
-            <div className="flex flex-col items-end gap-2 w-full sm:w-auto">
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  leftIcon={<X size={14} />}
-                  onClick={onDismiss}
-                  title="Hide this offer from your queue — the customer keeps waiting for a mechanic."
-                  disabled={disabled && !accepting}
-                >
-                  Hide
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  leftIcon={<XCircle size={14} />}
-                  onClick={onDecline}
-                  title="Decline this offer — it will no longer appear in your queue."
-                  disabled={disabled && !accepting}
-                >
-                  Decline
-                </Button>
-              </div>
-              <Button variant="live" size="sm" loading={accepting} disabled={disabled} onClick={onAccept} title={blockReason}>Accept</Button> // Row 11 — pending/disabled guard, server transaction authoritative
-            </div>
-          </div>
+          <CountdownRing fraction={left / OFFER_WINDOW_MS} label={left === 0 ? '0:00' : formatCountdownMs(left)} urgent={urgent || left === 0} />
         </div>
-        <Progress className="mt-4" value={pct} hue={urgent ? 'gold' : 'aqua'} />
+
+        <dl className="mt-4 grid gap-0 border-t border-line-soft text-small">
+          <div className="flex items-center justify-between gap-4 border-b border-line-soft py-2.5">
+            <dt className="text-fg-muted">Location</dt>
+            <dd className="font-mono text-xs text-fg-app">{job.customerLat.toFixed(4)}, {job.customerLng.toFixed(4)}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-4 border-b border-line-soft py-2.5">
+            <dt className="text-fg-muted">Distance</dt>
+            <dd className="font-medium text-fg-app">{kmAway != null ? `${kmAway.toFixed(1)} km straight-line` : '—'}</dd>
+          </div>
+          <div className="flex items-center justify-between gap-4 py-2.5">
+            <dt className="text-fg-muted">Customer note</dt>
+            <dd className="max-w-[60%] truncate text-right text-fg-app">{job.problemText}</dd>
+          </div>
+        </dl>
+
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          <Button variant="success" size="md" fullWidth leftIcon={<Check size={15} />} loading={accepting} disabled={disabled} onClick={onAccept} title={blockReason}>Accept job</Button>
+          <Button variant="secondary" size="md" fullWidth leftIcon={<X size={15} />} loading={false} disabled={disabled && !accepting} onClick={onDecline}>Decline</Button>
+        </div>
+        <button type="button" onClick={onDismiss} className="mt-2 w-full text-center text-xs text-fg-subtle hover:text-fg-app">
+          Hide this offer
+        </button>
+        {left === 0 && (
+          <p role="status" className="mt-2 text-center text-xs text-danger-500">Offer window elapsed — the dispatcher may already have moved on.</p>
+        )}
       </Card>
     </li>
   );
@@ -529,11 +530,11 @@ function DeclineModal({
   );
 }
 
-function Meta({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function Meta({ icon, label, value, light }: { icon: ReactNode; label: string; value: string; light?: boolean }) {
   return (
     <div>
-      <div className="eyebrow inline-flex items-center gap-1.5">{icon}{label}</div>
-      <div className="mt-1 font-mono text-xs text-fg-app">{value}</div>
+      <div className={'eyebrow inline-flex items-center gap-1.5 ' + (light ? 'text-white/60' : '')}>{icon}{label}</div>
+      <div className={'mt-1 font-mono text-xs ' + (light ? 'text-white' : 'text-fg-app')}>{value}</div>
     </div>
   );
 }
@@ -575,7 +576,7 @@ function VerificationBanner({
       role={tone === 'danger' ? 'alert' : 'status'}
       aria-live="polite"
       className={
-        'mb-8 flex flex-wrap items-start gap-3 rounded-xl border p-4 ' + wrap
+        'flex flex-wrap items-start gap-3 rounded-xl border p-4 ' + wrap
       }
     >
       <span aria-hidden className="mt-0.5 grid h-7 w-7 place-items-center rounded-md bg-surface-1/70">

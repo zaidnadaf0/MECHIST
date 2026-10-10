@@ -1,20 +1,26 @@
 /**
- * Public-facing data access — what unauthenticated visitors can read.
+ * Public-facing data access — the customer-safe mechanic projection.
  *
- * The Firestore rules gate these reads to specific filter combinations
- * (e.g. `approved == true && isAvailable == true` on `mechanics`). This
- * module is the only place that constructs those public reads; pages
+ * Phase 1D: these readers query `publicMechanics/{uid}`, a server-generated
+ * projection containing ONLY safe fields (name, availability, specialties,
+ * rating, coarse baseLat/baseLng rounded to ~1.1 km, …). Exact home/garage
+ * coordinates, live GPS, garage address and contact fields NEVER reach the
+ * client through this module. The private `mechanics/{uid}` parent doc is
+ * owner + claim-admin only (see firestore.rules).
+ *
+ * This module is the only place that constructs those public reads; pages
  * should never hand-write Firestore queries for public data.
  *
  * All accessors are null-safe: if Firebase is not configured, they
  * return early and the page renders the empty/error state itself.
  */
 import {
-  collection, getDocs, limit, onSnapshot, orderBy, query, where,
+  collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, where,
   type DocumentData, type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '@/app/firebase';
 import type { MechanicProfile } from './mechanic';
+import { DEMO_MECHANICS, isDemo } from './demo';
 
 function requireDb() {
   const handle = db();
@@ -37,6 +43,7 @@ export type PublicMechanic = MechanicProfile;
  *   - `isAvailable === true`
  */
 export async function listPublicMechanics(max = 100): Promise<MechanicProfile[]> {
+  if (isDemo()) return DEMO_MECHANICS.filter((m) => m.approved && m.isAvailable).slice(0, max);
   try {
     const d = requireDb();
     const snap = await getDocs(
@@ -56,6 +63,10 @@ export async function listPublicMechanics(max = 100): Promise<MechanicProfile[]>
 
 /** Realtime variant: streams the public roster as availability changes. */
 export function watchPublicMechanics(max = 100, cb: (items: MechanicProfile[]) => void, onError?: (err: Error) => void): Unsubscribe | null {
+  if (isDemo()) {
+    queueMicrotask(() => cb(DEMO_MECHANICS.filter((m) => m.approved && m.isAvailable).slice(0, max)));
+    return null;
+  }
   try {
     const d = requireDb();
     return onSnapshot(

@@ -36,7 +36,11 @@ export function MechanicJob() {
   const [job, setJob] = useState<ServiceRequest | null | 'loading'>('loading');
   const [busy, setBusy] = useState(false);
   const [releasing, setReleasing] = useState<{ reason: string } | null>(null);
-  const [geo] = useWatchPosition(LIVE_THROTTLE);
+  // The GPS watcher only runs while a live job is open: it never prompts
+  // for permission on closed jobs, and it stops (clearWatch via the hook)
+  // the moment the job completes / is cancelled / unmounts.
+  const jobLive = job !== 'loading' && job !== null && LIVE_STATUSES.has(job.status);
+  const [geo] = useWatchPosition({ ...LIVE_THROTTLE, enabled: jobLive });
   const lastPushedRef = useRef<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
@@ -224,6 +228,13 @@ export function MechanicJob() {
 
       <Card className="mt-6">
         <h2 className="text-h2 text-fg-app">Customer location</h2>
+        {liveTracking && (geo.status === 'denied' || geo.status === 'unavailable' || geo.status === 'error') && (
+          <div role="alert" className="mt-3 rounded-lg border border-warning-500/30 bg-warning-500/10 p-3 text-small text-fg-app">
+            {geo.status === 'denied'
+              ? 'Live location is blocked — the customer sees your last known position. Allow location in your browser\u2019s site settings to resume sharing.'
+              : 'Could not get a GPS fix — the customer sees your last known position. Move somewhere with a clearer sky view.'}
+          </div>
+        )}
         <div className="mt-3 overflow-hidden rounded-xl">
           <ProviderMap
             center={[job.customerLat, job.customerLng]}

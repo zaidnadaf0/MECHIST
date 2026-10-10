@@ -9,6 +9,7 @@ type Variant =
   | 'accent'    // gold — roadside / urgent
   | 'live'      // aqua — realtime actions (accept job, start tracking)
   | 'iris'      // violet — intelligence / admin actions
+  | 'success'   // green — accept / confirm-positive
   | 'danger';
 
 type Size = 'sm' | 'md' | 'lg' | 'xl';
@@ -40,10 +41,11 @@ const solid = (from: string, to: string, ring: string, fg = 'text-white') =>
   );
 
 const variants: Record<Variant, string> = {
-  primary: solid('from-azure-500', 'to-azure-600', 'focus-visible:ring-azure-400'),
+  primary: solid('from-ember-600', 'to-ember-700', 'focus-visible:ring-ember-500'),
   live: solid('from-aqua-500', 'to-aqua-600', 'focus-visible:ring-aqua-400'),
   iris: solid('from-iris-500', 'to-iris-600', 'focus-visible:ring-iris-400'),
   accent: solid('from-gold-400', 'to-gold-500', 'focus-visible:ring-gold-300', 'text-ink-900'),
+  success: solid('from-success-500', 'to-success-600', 'focus-visible:ring-success-400', 'text-ink-950'),
   danger: solid('from-danger-500', 'to-danger-600', 'focus-visible:ring-danger-400'),
   secondary: cx(
     'bg-surface-2 text-fg-app border border-line-soft',
@@ -69,7 +71,7 @@ const sizes: Record<Size, string> = {
   xl: 'h-14 px-7 text-body-lg',
 };
 
-const glossy = new Set<Variant>(['primary', 'live', 'iris', 'accent', 'danger']);
+const glossy = new Set<Variant>(['primary', 'live', 'iris', 'accent', 'success', 'danger']);
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = 'primary', size = 'md', loading, leftIcon, rightIcon, fullWidth, className, children, disabled, ...rest },

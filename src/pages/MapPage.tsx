@@ -62,7 +62,7 @@ function MapPageInner() {
   const origin = useMemo<LatLng | null>(() => (effective.coords ? { lat: effective.coords.lat, lng: effective.coords.lng } : null), [effective.coords]);
 
   useEffect(() => {
-    if (!firebaseConfigured) { setLoading(false); setError('MECHIST is not yet connected to its backend. Check back soon.'); return; }
+    if (!firebaseConfigured) { setLoading(false); setError('RoadAssisst is not yet connected to its backend. Check back soon.'); return; }
     const unsub = watchPublicMechanics(200, (items) => { setRoster(items); setLoading(false); });
     return () => { if (unsub) unsub(); };
   }, []);
@@ -78,6 +78,13 @@ function MapPageInner() {
   }, [roster, origin, category]);
 
   const markers = useMemo(() => toMapMarkers(filtered.map((f) => f.m)), [filtered]);
+  const counts = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const c of ['all', 'flat-tyre', 'battery', 'engine', 'tow', 'other'] as const) {
+      out.set(c, c === 'all' ? roster.length : roster.filter((m) => problemCompatibility(c, m.specialties)).length);
+    }
+    return out;
+  }, [roster]);
   const selected = useMemo(() => (selectedId ? filtered.find((f) => f.m.id === selectedId)?.m ?? null : null), [selectedId, filtered]);
   const center: [number, number] = useMemo(() => {
     if (selected?.baseLat != null && selected?.baseLng != null) return [selected.baseLat, selected.baseLng];
@@ -112,7 +119,7 @@ function MapPageInner() {
           {(['all', 'flat-tyre', 'battery', 'engine', 'tow', 'other'] as const).map((c) => {
             const on = category === c;
             const label = c === 'all' ? 'All' : c === 'flat-tyre' ? 'Tyres' : c === 'battery' ? 'Battery' : c === 'engine' ? 'Engine' : c === 'tow' ? 'Tow' : 'Other';
-            return <button key={c} type="button" onClick={() => { setCategory(c); setSelectedId(null); }} className={`rounded-lg px-3 py-1.5 text-xs font-mono transition-all ${on ? 'bg-azure-500 text-white font-semibold shadow-sm' : 'text-fg-muted hover:text-fg-app hover:bg-surface-app/60'}`}>{label}</button>;
+            return <button key={c} type="button" aria-pressed={on} onClick={() => { setCategory(c); setSelectedId(null); }} className={`rounded-lg px-3 py-1.5 text-xs font-mono transition-all ${on ? 'bg-azure-500 text-white font-semibold shadow-sm' : 'text-fg-muted hover:text-fg-app hover:bg-surface-app/60'}`}>{label} · {counts.get(c) ?? 0}</button>;
           })}
         </div>
         <Button variant={origin ? 'secondary' : 'primary'} size="sm" leftIcon={<LocateFixed size={14} />} loading={locating} onClick={() => requestGeo()} aria-label="Use my location">Use My Location</Button>
@@ -186,7 +193,7 @@ function MapPageInner() {
                   </ul>
                 )}
               </div>
-              <div className="border-t border-line-soft p-3">{selected ? <div className="flex flex-col gap-2"><div className="text-small font-medium text-fg-app">{selected.name}</div><div className="flex gap-2"><Link to="/request" className="inline-flex flex-1 items-center justify-center rounded-lg bg-azure-600 px-3 py-2 text-small font-medium text-white hover:bg-azure-700 transition-colors">Request this mechanic</Link><Button variant="secondary" size="sm" onClick={() => setSelectedId(null)}>Clear</Button></div></div> : <p className="text-xs text-fg-subtle">Tap a mechanic to focus the map, then request help. Use My Location to sort by distance.</p>}</div>
+              <div className="border-t border-line-soft p-3">{selected ? <div className="flex flex-col gap-2"><div className="text-small font-medium text-fg-app">{selected.name}</div><div className="flex gap-2"><Link to={`/request?mechanic=${selected.id}`} className="inline-flex flex-1 items-center justify-center rounded-lg bg-azure-600 px-3 py-2 text-small font-medium text-white hover:bg-azure-700 transition-colors">Request this mechanic</Link><Button variant="secondary" size="sm" onClick={() => setSelectedId(null)}>Clear</Button></div></div> : <p className="text-xs text-fg-subtle">Tap a mechanic to focus the map, then request help. Use My Location to sort by distance.</p>}</div>
             </Card>
           )}
         </div>

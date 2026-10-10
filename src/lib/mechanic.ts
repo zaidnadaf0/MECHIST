@@ -5,12 +5,13 @@
  */
 import {
   collection, doc, getDoc, getDocs, limit, onSnapshot, orderBy, query, runTransaction,
-  serverTimestamp, updateDoc, where,
+  serverTimestamp, setDoc, updateDoc, where,
   type DocumentData, type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '@/app/firebase';
 import type { ServiceRequest } from './customer';
 import { OFFER_WINDOW_MS } from './customer';
+import { DEMO_MECHANICS, DEMO_MECHANIC_ID, DEMO_REQUESTS, isDemo } from './demo';
 
 function requireDb() {
   const handle = db();
@@ -80,6 +81,10 @@ export function watchIncoming(
   onError?: (err: Error) => void,
   excludeUid?: string,
 ): Unsubscribe | null {
+  if (isDemo()) {
+    queueMicrotask(() => cb(DEMO_REQUESTS.filter((j) => j.status === 'requested' && !(excludeUid && (j.declinedBy ?? []).includes(excludeUid)))));
+    return null;
+  }
   try {
     const d = requireDb();
     return onSnapshot(
@@ -173,6 +178,11 @@ export async function acceptJob(
  * Schema: ServiceRequest { amountCents?: number (minor units, >=0), durationMin?: number (>=0) }
  * Verbatim instruction: Batch 2 History enrichment add optional amountCents and durationMin only if
  * justified preserve compatibility fallback safely do not fabricate.
+ *
+ * Batch 7 race guard: transactional read-then-write that refuses to move a
+ * terminal job (completed/cancelled). Without this, a mechanic's
+ * complete-write racing a customer/admin cancel could flip a cancelled job
+ * back to completed (or vice versa) — last-writer-wins on a plain updateDoc.
  */
 export async function updateJobStatus(
   id: string,
@@ -181,13 +191,19 @@ export async function updateJobStatus(
 ): Promise<boolean> {
   try {
     const d = requireDb();
-    const patch: Record<string, unknown> = { status, updatedAt: serverTimestamp() };
-    if (status === 'completed') {
-      if (extra?.amountCents != null && Number.isFinite(extra.amountCents) && extra.amountCents >= 0) patch.amountCents = Math.round(extra.amountCents);
-      if (extra?.durationMin != null && Number.isFinite(extra.durationMin) && extra.durationMin >= 0) patch.durationMin = Math.round(extra.durationMin);
-    }
-    await updateDoc(doc(d, 'requests', id), patch);
-    return true;
+    return await runTransaction(d, async (tx) => {
+      const snap = await tx.get(doc(d, 'requests', id));
+      if (!snap.exists()) return false;
+      const cur = (snap.data() as ServiceRequest).status;
+      if (cur === 'completed' || cur === 'cancelled') return false;
+      const patch: Record<string, unknown> = { status, updatedAt: serverTimestamp() };
+      if (status === 'completed') {
+        if (extra?.amountCents != null && Number.isFinite(extra.amountCents) && extra.amountCents >= 0) patch.amountCents = Math.round(extra.amountCents);
+        if (extra?.durationMin != null && Number.isFinite(extra.durationMin) && extra.durationMin >= 0) patch.durationMin = Math.round(extra.durationMin);
+      }
+      tx.update(doc(d, 'requests', id), patch);
+      return true;
+    });
   } catch { return false; }
 }
 
@@ -264,6 +280,7 @@ export async function releaseJob(
         status: 'requested',
         mechanicId: null,
         mechanicName: null,
+        mechanicPhone: null,
         mechanicLat: null,
         mechanicLng: null,
         offerExpiresAt: Date.now() + OFFER_WINDOW_MS,
@@ -281,12 +298,58 @@ export async function releaseJob(
 }
 
 export async function getMechanicProfile(uid: string): Promise<MechanicProfile | null> {
+  if (isDemo()) return DEMO_MECHANICS.find((m) => m.id === uid) ?? DEMO_MECHANICS.find((m) => m.id === DEMO_MECHANIC_ID) ?? null;
   try {
     const d = requireDb();
     const snap = await getDoc(doc(d, 'mechanics', uid));
     if (!snap.exists()) return null;
     return { id: snap.id, ...(snap.data() as Omit<MechanicProfile, 'id'>) };
   } catch { return null; }
+}
+
+/**
+ * Owner-scoped contact card (`mechanics/{uid}/private/contact`).
+ * Returns null when the viewer is not the owner/admin (permission-denied
+ * is swallowed by design) or when no contact was saved yet. Public pages
+ * must never call this — the roster works without contact fields.
+ */
+export interface MechanicContact {
+  phone: string | null;
+  email: string | null;
+}
+
+export async function getMechanicContact(uid: string): Promise<MechanicContact | null> {
+  if (isDemo()) {
+    const m = DEMO_MECHANICS.find((x) => x.id === uid);
+    return { phone: m?.phone ?? null, email: m?.email ?? null };
+  }
+  try {
+    const d = requireDb();
+    const snap = await getDoc(doc(d, 'mechanics', uid, 'private', 'contact'));
+    if (!snap.exists()) return null;
+    const raw = snap.data() as Partial<MechanicContact>;
+    return {
+      phone: typeof raw.phone === 'string' ? raw.phone : null,
+      email: typeof raw.email === 'string' ? raw.email : null,
+    };
+  } catch { return null; }
+}
+
+/** Update the owner's own contact card. Phone/email never land on the parent doc. */
+export async function updateMechanicContact(
+  uid: string,
+  patch: { phone?: string | null; email?: string | null },
+): Promise<boolean> {
+  try {
+    const d = requireDb();
+    const clean: DocumentData = { updatedAt: serverTimestamp() };
+    if (patch.phone !== undefined) clean.phone = patch.phone;
+    if (patch.email !== undefined) clean.email = patch.email;
+    // setDoc+merge (not updateDoc): legacy profiles created before the
+    // contact split have no private/contact doc yet.
+    await setDoc(doc(d, 'mechanics', uid, 'private', 'contact'), clean, { merge: true });
+    return true;
+  } catch { return false; }
 }
 
 export async function setAvailability(uid: string, isAvailable: boolean): Promise<boolean> {
@@ -329,6 +392,7 @@ export type ListCompletedResult =
   | { data: null; error: Error };
 
 export async function listCompletedJobs(mechanicId: string, max = 30): Promise<ListCompletedResult> {
+  if (isDemo()) return { data: DEMO_REQUESTS.filter((r) => r.status === 'completed').slice(0, max), error: null };
   try {
     const d = requireDb();
     const snap = await getDocs(
@@ -348,6 +412,7 @@ export type ListActiveResult =
   | { data: null; error: Error };
 
 export async function listActiveJob(mechanicId: string): Promise<ListActiveResult> {
+  if (isDemo()) return { data: DEMO_REQUESTS.find((r) => ['accepted', 'on-the-way', 'arrived', 'service'].includes(r.status)) ?? null, error: null };
   try {
     const d = requireDb();
     const snap = await getDocs(

@@ -78,6 +78,25 @@ const gold = {
   900: '#452c0c',
 };
 
+/*
+ * RoadAssisst brand accent — safety orange, used sparingly (primary CTAs,
+ * key highlights). Text on ember-600/700+ is white and holds ≥4.5:1.
+ * Role tones (azure/aqua/iris) and gold are unchanged: they encode
+ * customer/mechanic/admin semantics across the portals.
+ */
+const ember = {
+  50: '#fff4ed',
+  100: '#ffe6d5',
+  200: '#feccaa',
+  300: '#fdac74',
+  400: '#fb813c',
+  500: '#f96116',
+  600: '#ea4e0c',
+  700: '#c2410c',
+  800: '#9a3412',
+  900: '#7c2d12',
+};
+
 const config: Config = {
   darkMode: 'class',
 
@@ -190,6 +209,7 @@ const config: Config = {
         aqua,
         iris,
         gold,
+        ember,
 
         brand: azure,
         info: azure,

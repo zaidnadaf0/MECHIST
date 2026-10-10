@@ -5,6 +5,7 @@ import {
   Card,
   Counter,
   SectionHeading,
+  Stars,
 } from '@/components/ui';
 import { EmptyState, ErrorState, ErrorBoundary, Skeleton } from '@/components/feedback';
 import { FadeIn, ScrollRevealSection } from '@/components/motion';
@@ -35,7 +36,7 @@ function MechanicDirectoryInner() {
   useEffect(() => {
     if (!firebaseConfigured) {
       setLoading(false);
-      setError('MECHIST is not yet connected to its backend. Check back soon.');
+      setError('RoadAssisst is not yet connected to its backend. Check back soon.');
       return;
     }
     const unsub = watchPublicMechanics(100, (items) => {
@@ -63,6 +64,16 @@ function MechanicDirectoryInner() {
     const set = new Set<string>();
     roster.forEach((m) => (m.specialties ?? []).forEach((s) => set.add(s.toLowerCase())));
     return Array.from(set).sort();
+  }, [roster]);
+
+  // Live per-filter counts from the actual roster — same compatibility
+  // logic as dispatch matching, so the numbers never lie.
+  const counts = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const c of ['all', 'flat-tyre', 'battery', 'engine', 'tow', 'other'] as const) {
+      out.set(c, c === 'all' ? roster.length : roster.filter((m) => problemCompatibility(c, m.specialties)).length);
+    }
+    return out;
   }, [roster]);
 
   const filtered = useMemo(() => {
@@ -135,13 +146,14 @@ function MechanicDirectoryInner() {
                   key={c}
                   type="button"
                   onClick={() => setCategory(c)}
+                  aria-pressed={isActive}
                   className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all duration-200 ${
                     isActive
                       ? 'bg-azure-500 text-white font-semibold shadow-sm'
                       : 'text-fg-muted hover:text-fg-app hover:bg-surface-app/60'
                   }`}
                 >
-                  {label}
+                  {label} · {counts.get(c) ?? 0}
                 </button>
               );
             })}
@@ -210,7 +222,7 @@ function SkeletonGrid() {
 
 function MechanicCard({ m, distanceKm: dist }: { m: PublicMechanic; distanceKm: number | null }) {
   const specialtyHeadline = (m.specialties ?? []).slice(0, 3).join(' · ') || 'General mechanic';
-  const ctaTo = m.isAvailable ? '/request' : '#';
+  const ctaTo = m.isAvailable ? `/request?mechanic=${m.id}` : '#';
   const ctaLabel = m.isAvailable ? 'Request' : 'Busy';
   return (
     <Card className="h-full" tone={m.isAvailable ? 'aqua' : 'neutral'}>
@@ -226,6 +238,12 @@ function MechanicCard({ m, distanceKm: dist }: { m: PublicMechanic; distanceKm: 
       <div className="mt-4">
         <h3 className="display text-h3 text-fg-app font-bold">{m.name}</h3>
         {m.garageName && <p className="mt-0.5 text-small text-fg-muted">{m.garageName}</p>}
+        {typeof m.rating === 'number' ? (
+          <p className="mt-1.5 flex items-center gap-1.5 text-small text-fg-muted">
+            <Stars value={m.rating} size="xs" /> {m.rating.toFixed(1)}
+            {typeof m.reviewCount === 'number' ? ` (${m.reviewCount})` : ''}
+          </p>
+        ) : null}
         <p className="mt-3 text-small text-fg-muted">{specialtyHeadline}</p>
       </div>
 
@@ -268,12 +286,20 @@ function MechanicCard({ m, distanceKm: dist }: { m: PublicMechanic; distanceKm: 
           )}
         </div>
         {m.isAvailable ? (
-          <Link
-            to={ctaTo}
-            className="inline-flex items-center justify-center h-9 px-3.5 rounded-lg text-small font-medium tracking-[-0.01em] bg-gradient-to-b from-azure-500 to-azure-600 text-white shadow-[0_1px_0_0_rgb(255_255_255/0.18)_inset,0_10px_24px_-12px_rgb(0_0_0/0.5)] hover:brightness-[1.07] hover:-translate-y-px transition-[transform,background-color,border-color,box-shadow,color] duration-200 ease-out-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-app focus-visible:ring-azure-400"
-          >
-            {ctaLabel}
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              to={`/mechanics/${m.id}`}
+              className="inline-flex items-center justify-center h-9 px-3 rounded-lg text-small font-medium border border-line-soft bg-surface-2 text-fg-app hover:border-line-strong transition-colors"
+            >
+              Details
+            </Link>
+            <Link
+              to={ctaTo}
+              className="inline-flex items-center justify-center h-9 px-3.5 rounded-lg text-small font-medium tracking-[-0.01em] bg-gradient-to-b from-azure-500 to-azure-600 text-white shadow-[0_1px_0_0_rgb(255_255_255/0.18)_inset,0_10px_24px_-12px_rgb(0_0_0/0.5)] hover:brightness-[1.07] hover:-translate-y-px transition-[transform,background-color,border-color,box-shadow,color] duration-200 ease-out-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-surface-app focus-visible:ring-azure-400"
+            >
+              {ctaLabel}
+            </Link>
+          </div>
         ) : (
           <span className="inline-flex items-center justify-center h-9 px-3.5 rounded-lg text-small font-medium bg-surface-2 text-fg-subtle border border-line-soft">
             {ctaLabel}

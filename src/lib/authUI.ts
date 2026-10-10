@@ -65,7 +65,7 @@ const AUTH_ERROR_MAP: Record<string, AuthErrorShape> = {
   },
   'auth/user-disabled': {
     title: 'This account is disabled',
-    body: 'Please contact MECHIST support to restore access.',
+    body: 'Please contact RoadAssisst support to restore access.',
   },
   'auth/user-not-found': {
     title: 'No account matches those details',
@@ -141,7 +141,7 @@ const AUTH_ERROR_MAP: Record<string, AuthErrorShape> = {
 
 const DEFAULT_AUTH_ERROR: AuthErrorShape = {
   title: 'Something went wrong',
-  body: 'Please try again. If the problem persists, contact MECHIST support.',
+  body: 'Please try again. If the problem persists, contact RoadAssisst support.',
 };
 
 /** Map a Firebase Auth error to a user-friendly message. */
@@ -240,7 +240,7 @@ export function verificationUi(s: VerificationStatus | null | undefined): Verifi
         badgeTone: 'danger',
         badgeLabel: 'Application rejected',
         bannerTitle: 'Your application was not approved',
-        bannerBody: 'Please contact MECHIST support for the reason and the steps to re-apply with additional documentation.',
+        bannerBody: 'Please contact RoadAssisst support for the reason and the steps to re-apply with additional documentation.',
         canAcceptJobs: false,
       };
     case 'pending':

@@ -132,6 +132,7 @@ export async function resetRequestForRematch(
         status: 'requested',
         mechanicId: null,
         mechanicName: null,
+        mechanicPhone: null,
         mechanicLat: null,
         mechanicLng: null,
         offerExpiresAt: Date.now() + OFFER_WINDOW_MS,

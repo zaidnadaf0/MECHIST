@@ -26,7 +26,7 @@ export function Footer() {
             <span className="grid h-9 w-9 place-items-center overflow-hidden rounded-lg ring-1 ring-inset ring-line-soft">
               <LogoMark className="h-full w-full" />
             </span>
-            <span className="display text-h2 font-bold tracking-[-0.03em] text-fg-app">MECHIST</span>
+            <span className="display text-h2 font-bold tracking-[-0.03em] text-fg-app">ROADASSISST</span>
           </div>
           <p className="mt-5 max-w-sm text-body-lg leading-relaxed text-fg-muted text-pretty">
             Roadside help, the moment it matters — vetted mechanics,
@@ -55,17 +55,17 @@ export function Footer() {
             <FooterLink to="/#trust">Trust &amp; safety</FooterLink>
           </FooterCol>
           <FooterCol title="Company" hue="bg-iris-500">
-            <FooterLink to="/#trust">About</FooterLink>
-            <FooterLink to="/#trust">Trust</FooterLink>
-            <FooterLink to="/#trust">Privacy</FooterLink>
-            <FooterLink to="/#trust">Terms</FooterLink>
+            <FooterLink to="/how-it-works">About</FooterLink>
+            <FooterLink to="/#trust">Trust &amp; safety</FooterLink>
+            <FooterLink to="/mechanics">Mechanic network</FooterLink>
+            <FooterLink to="/map">Live map</FooterLink>
           </FooterCol>
         </div>
       </div>
 
       <div className="container relative flex flex-col gap-3 border-t border-line-soft py-6 sm:flex-row sm:items-center sm:justify-between">
         <p className="font-mono text-xs text-fg-subtle">
-          © {new Date().getFullYear()} MECHIST — roadside assistance, reimagined.
+          © {new Date().getFullYear()} RoadAssisst — roadside help, when you need it.
         </p>
         <p className="font-mono text-xs text-fg-subtle">
           Built for the moment everything goes sideways.

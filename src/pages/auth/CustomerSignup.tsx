@@ -42,7 +42,7 @@ interface RouterState {
 }
 
 export function CustomerSignup() {
-  const { signUp, signIn, user, configured } = useAuth();
+  const { signUp, signIn, signOut, user, role, configured } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const state = (location.state ?? {}) as RouterState;
@@ -55,17 +55,87 @@ export function CustomerSignup() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorBody, setErrorBody] = useState<string | null>(null);
+  // Set once the Auth account + profile doc are confirmed. Navigation into
+  // the portal happens from the effect below ONLY after AuthProvider has
+  // delivered `user` and resolved the role — navigating any earlier races
+  // onAuthStateChanged and RequireAuth bounces back to the role tiles.
+  const [created, setCreated] = useState(false);
 
   useEffect(() => {
-    if (user) navigate('/dashboard', { replace: true });
-  }, [user, navigate]);
+    if (!created) return;
+    if (user && role === 'customer') {
+      navigate('/dashboard', { replace: true });
+    } else if (user && role !== null && role !== 'unknown') {
+      navigate(role === 'mechanic' ? '/mechanic' : '/admin', { replace: true });
+    } else if (user && role === null) {
+      setError('Account created, but no profile was found. Please sign in.');
+      setCreated(false);
+    }
+  }, [created, user, role, navigate]);
+
+  // A signed-in user WITH a completed profile who lands here sees an
+  // explicit handoff card (not a blank redirect). A signed-in user with NO
+  // profile doc yet (mid-signup continuation, role null/unknown) still sees
+  // the form so the flow can finish.
+  const alreadyRegistered = Boolean(user) && role !== null && role !== 'unknown';
 
   const passwordsMatch = useMemo(
     () => password.length > 0 && password === confirm,
     [password, confirm],
   );
 
-  if (user) return null;
+  if (alreadyRegistered) {
+    return (
+      <AuthScreen
+        icon={<Car className="h-5 w-5" />}
+        hue="azure"
+        eyebrow="Customer sign-up"
+        title="You're already signed in"        description="This account already has a profile. Continue to your portal, or sign out to create a different account."
+        configured={configured}
+        backHref="/login"
+        backLabel="Back to sign-in"
+      >
+        <Card tone="azure" elevated>
+          <div className="flex flex-col gap-3">
+            <Button
+              variant="primary" size="lg" fullWidth
+              rightIcon={<ArrowRight className="h-4 w-4" />}
+              onClick={() => navigate(role === 'mechanic' ? '/mechanic' : role === 'admin' ? '/admin' : '/dashboard')}
+            >
+              Go to my portal
+            </Button>
+            <Button variant="ghost" size="md" fullWidth onClick={() => void signOut()}>
+              Sign out
+            </Button>
+          </div>
+        </Card>
+      </AuthScreen>
+    );
+  }
+
+  // Profile is saved; waiting for AuthProvider to deliver the user +
+  // resolved role before the effect above routes into the portal.
+  if (created) {
+    return (
+      <AuthScreen
+        icon={<Car className="h-5 w-5" />}
+        hue="azure"
+        eyebrow="Customer sign-up"
+        title="Setting up your account…"
+        description="Almost there — we're confirming your profile and taking you to your dashboard."
+        configured={configured}
+        backHref="/login"
+        backLabel="Back to sign-in"
+      >
+        <Card tone="azure" elevated>
+          <div className="flex items-center gap-3" role="status" aria-live="polite">
+            <span aria-hidden className="h-5 w-5 rounded-full border-2 border-azure-500 border-t-transparent animate-spin" />
+            <span className="text-small text-fg-muted">Finishing up — this takes a few seconds.</span>
+          </div>
+        </Card>
+      </AuthScreen>
+    );
+  }
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -116,7 +186,10 @@ export function CustomerSignup() {
       const confirmed = await confirmUserRoleReadable(uid, 'customer');
       if (!confirmed) throw new Error('Profile is taking longer than expected to save. Please try again in a moment.');
 
-      navigate('/dashboard', { replace: true });
+      // Hand off to the effect above: it navigates once AuthProvider has
+      // the user + resolved role, so RequireAuth never sees a half-ready
+      // auth state and bounces to the sign-in role tiles.
+      setCreated(true);
     } catch (err) {
       const f = friendlyAuthError(err);
       setError(f.title);
@@ -146,7 +219,7 @@ export function CustomerSignup() {
           <p className="text-center text-xs text-fg-subtle">
             Staff member?{' '}
             <Link to="/admin/login" className="link-quiet">
-              Open the MECHIST control room
+              Open the RoadAssisst control room
             </Link>.
           </p>
         </>

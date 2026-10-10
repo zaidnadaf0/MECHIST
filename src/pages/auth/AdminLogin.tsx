@@ -4,13 +4,13 @@
  * (custom claim `admin: true` is set by a Cloud Function / Firebase
  * console), so this page is *only* for users who already hold that claim.
  *
- * Behaviour:
+ * Behaviour (Phase 1C):
  *   - Authenticates with email/password.
- *   - After sign-in, fetches the user doc and confirms the `admin` role.
- *   - If the role is not admin, sign the user out and show a clear error.
- *   - The canonical `role` lives at `users/{uid}.role` (or in custom
- *     claims once a backend exists) — the localStorage dev hint is NOT
- *     trusted for admin gating.
+ *   - Verifies the Firebase ID-token custom claim (admin === true) AND the
+ *     users/{uid}.role === 'admin' hint. Either missing → sign out + error.
+ *   - The claim is authoritative; the doc is a hint. Route-level gating in
+ *     RequireAuth (requireAdminClaim) re-checks the claim from context.
+ *   - The localStorage dev hint is NOT trusted for admin gating.
  */
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -23,7 +23,7 @@ import { sendPasswordResetEmail, signOut as fbSignOut } from 'firebase/auth';
 import { friendlyAuthError, isValidEmailShape } from '@/lib/authUI';
 
 export function AdminLogin() {
-  const { signIn, user, configured } = useAuth();
+  const { signIn, signOut, user, role, isAdmin, configured } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,18 +33,82 @@ export function AdminLogin() {
   const [notAdmin, setNotAdmin] = useState(false);
   const [resetSent, setResetSent] = useState(false);
 
-  // If an admin is already signed in, send them straight to /admin
-  // (or honour `?next=` if the guard sent them here).
+  // If an admin is already signed in (claim verified), send them to /admin.
+  // Non-admin users who land here see the "not an admin" guard below.
+  // Phase 1C: the ID-token claim (isAdmin) is authoritative — a doc-role
+  // admin WITHOUT the claim must not be waved through.
   useEffect(() => {
-    if (user) {
+    if (user && role === 'admin' && isAdmin === true) {
       const sp = new URLSearchParams(window.location.search);
       const next = sp.get('next');
       const dest = next && next.startsWith('/') && !next.startsWith('//') ? next : '/admin';
       navigate(dest, { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, role, isAdmin, navigate]);
 
-  if (user) return null;
+  // Already signed in as a verified admin: explicit handoff card (with sign-out)
+  // instead of a blank screen while redirecting.
+  if (user && role === 'admin' && isAdmin === true) {
+    return (
+      <AuthScreen
+        icon={<Gauge className="h-5 w-5" />}
+        hue="iris"
+        eyebrow="Staff access"
+        title="You're already signed in"
+        description="Continue to the RoadAssisst control room, or sign out to use a different account."
+        configured={configured}
+        backHref="/login"
+        backLabel="Back to main login"
+      >
+        <Card tone="iris" elevated>
+          <div className="flex flex-col gap-3">
+            <Button
+              variant="primary" size="lg" fullWidth
+              rightIcon={<ArrowRight className="h-4 w-4" />}
+              onClick={() => navigate('/admin')}
+            >
+              Open control room
+            </Button>
+            <Button variant="ghost" size="md" fullWidth onClick={() => void signOut()}>
+              Sign out
+            </Button>
+          </div>
+        </Card>
+      </AuthScreen>
+    );
+  }
+
+  // Signed in with a doc-role of admin but WITHOUT the token claim:
+  // show the guard (with a refresh path) instead of the handoff card.
+  // The claim is the authority; the doc is a hint.
+  if (user && role === 'admin' && isAdmin === false) {
+    return (
+      <AuthScreen
+        icon={<Gauge className="h-5 w-5" />}
+        hue="iris"
+        eyebrow="Staff access"
+        title="Admin claim missing"
+        description="This account's profile reads as admin, but its sign-in token does not carry admin authority. Ask a provisioned admin to grant it, then refresh below."
+        configured={configured}
+        backHref="/login"
+        backLabel="Back to main login"
+      >
+        <Card tone="iris" elevated>
+          <div className="flex flex-col gap-3">
+            <AuthAlert
+              tone="warning"
+              icon={<ShieldAlert aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />}
+              title="No functional admin access until the claim propagates."
+              body="Firestore rules gate every admin write on token.admin — hidden buttons are not security, the claim is."
+            />
+            <Button variant="ghost" size="md" fullWidth onClick={() => void signOut()}>
+              Sign out
+            </Button>
+          </div>
+        </Card>
+      </AuthScreen>
+    );
+  }
 
   const onForgot = async () => {
     setError(null); setErrorBody(null); setNotAdmin(false); setResetSent(false);
@@ -125,7 +189,7 @@ export function AdminLogin() {
       icon={<Gauge className="h-5 w-5" />}
       hue="iris"
       eyebrow="Staff access"
-      title="MECHIST CONTROL ROOM"
+        title="ROADASSISST CONTROL ROOM"
       description="Authorised personnel only. Customer and mechanic accounts sign in from the main login page."
       configured={configured}
       backHref="/login"

@@ -14,9 +14,6 @@ export default defineConfig({
     open: false,
   },
   build: {
-    // CP8 perf: split the heavy Firebase SDK out of the main bundle and put
-    // framer-motion on its own chunk. Pages that don't need motion (e.g.
-    // pure admin/utility views) can lazy-load their motion deps later.
     rollupOptions: {
       output: {
         manualChunks: {
@@ -32,6 +29,20 @@ export default defineConfig({
           gsap: ['gsap'],
           lenis: ['lenis'],
           lottie: ['lottie-react'],
+          lucide: ['lucide-react'],
+          ui: ['class-variance-authority', 'clsx', 'tailwind-merge'],
+          magicui: [
+            '@/components/magicui/animated-grid-pattern',
+            '@/components/magicui/blur-fade',
+            '@/components/magicui/globe',
+            '@/components/magicui/orbiting-circles',
+            '@/components/magicui/hero-video-dialog',
+            '@/components/magicui/shimmer-button',
+            '@/components/magicui/text-animate',
+            '@/components/magicui/particles',
+            '@/components/magicui/meteors',
+            '@/components/magicui/marquee',
+          ],
         },
       },
     },

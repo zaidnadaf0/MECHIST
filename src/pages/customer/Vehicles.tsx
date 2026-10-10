@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Card, Input, Select, useToast } from '@/components/ui';
+import { Button, Card, Input, Modal, Select, useToast } from '@/components/ui';
 import { EmptyState, Skeleton, ErrorState } from '@/components/feedback';
 import { FadeIn, MotionCard } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
-import { listVehicles, addVehicle, type Vehicle } from '@/lib/customer';
+import { listVehicles, addVehicle, updateVehicle, deleteVehicle, setDefaultVehicle, type Vehicle } from '@/lib/customer';
 
 export function Vehicles() {
   const { user, configured } = useAuth();
@@ -19,6 +19,25 @@ export function Vehicles() {
   const [type, setType] = useState<Vehicle['type']>('car');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Vehicle | null>(null);
+  const [editMake, setEditMake] = useState('');
+  const [editModel, setEditModel] = useState('');
+  const [editYear, setEditYear] = useState<number>(new Date().getFullYear());
+  const [editPlate, setEditPlate] = useState('');
+  const [editType, setEditType] = useState<Vehicle['type']>('car');
+  const [editErr, setEditErr] = useState<string | null>(null);
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
+
+  const startEdit = (v: Vehicle) => {
+    setEditingId(v.id);
+    setEditMake(v.make);
+    setEditModel(v.model);
+    setEditYear(v.year);
+    setEditPlate(v.plate);
+    setEditType(v.type);
+    setEditErr(null);
+  };
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
@@ -110,13 +129,125 @@ export function Vehicles() {
                     <div className="text-body font-medium text-fg-app">{v.make} {v.model}</div>
                     <div className="text-xs text-fg-muted">{v.year} · {v.plate}</div>
                   </div>
+                  {v.isDefault && (
+                    <span className="ml-auto rounded-full bg-success-500/15 px-2 py-0.5 text-xs font-semibold text-success-600">
+                      Default
+                    </span>
+                  )}
                 </div>
+                {editingId === v.id ? (
+                  <form
+                    className="mt-4 grid gap-3 sm:grid-cols-2"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!user) return;
+                      const maxYear = new Date().getFullYear() + 1;
+                      if (!editMake.trim() || !editModel.trim() || !editPlate.trim()) {
+                        setEditErr('Make, model and plate are required.');
+                        return;
+                      }
+                      if (!Number.isFinite(editYear) || editYear < 1950 || editYear > maxYear) {
+                        setEditErr(`Year must be between 1950 and ${maxYear}.`);
+                        return;
+                      }
+                      setEditErr(null);
+                      setRowBusy(v.id);
+                      const patch = { make: editMake.trim(), model: editModel.trim(), year: editYear, plate: editPlate.trim(), type: editType };
+                      const ok = await updateVehicle(v.id, patch);
+                      setRowBusy(null);
+                      if (!ok) { toast.push({ title: 'Could not save vehicle', tone: 'danger' }); return; }
+                      setItems((prev) => prev?.map((x) => (x.id === v.id ? { ...x, ...patch } : x)) ?? null);
+                      setEditingId(null);
+                      toast.push({ title: 'Vehicle updated', tone: 'success' });
+                    }}
+                  >
+                    <Select label="Type" value={editType} onChange={(e) => setEditType(e.target.value as Vehicle['type'])}>
+                      <option value="car">Car</option>
+                      <option value="bike">Motorbike</option>
+                      <option value="van">Van</option>
+                      <option value="truck">Truck</option>
+                    </Select>
+                    <Input label="Year" type="number" inputMode="numeric" min={1950} max={new Date().getFullYear() + 1} required autoComplete="off" value={editYear} onChange={(e) => setEditYear(Number(e.target.value))} />
+                    <Input label="Make" value={editMake} onChange={(e) => setEditMake(e.target.value)} required autoComplete="off" />
+                    <Input label="Model" value={editModel} onChange={(e) => setEditModel(e.target.value)} required autoComplete="off" />
+                    <Input label="Plate" value={editPlate} onChange={(e) => setEditPlate(e.target.value)} required autoComplete="off" className="sm:col-span-2" />
+                    {editErr && <p role="alert" className="sm:col-span-2 text-small text-danger-500">{editErr}</p>}
+                    <div className="flex gap-2 sm:col-span-2">
+                      <Button type="submit" size="sm" loading={rowBusy === v.id}>Save</Button>
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {!v.isDefault && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={rowBusy === `def-${v.id}`}
+                        onClick={async () => {
+                          if (!user) return;
+                          setRowBusy(`def-${v.id}`);
+                          const ok = await setDefaultVehicle(user.uid, v.id);
+                          setRowBusy(null);
+                          if (!ok) { toast.push({ title: 'Could not set default', tone: 'danger' }); return; }
+                          setItems((prev) => prev?.map((x) => ({ ...x, isDefault: x.id === v.id })) ?? null);
+                          toast.push({ title: 'Default vehicle set', tone: 'success' });
+                        }}
+                      >
+                        Set default
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => startEdit(v)}
+                    >
+                      Edit
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setDeleting(v)}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                )}
               </MotionCard>
             ))}
           </div>
         )}
         {err && <div className="mt-4"><ErrorState kind="api" title="Could not save" description={err} /></div>}
       </div>
+
+      <Modal
+        open={deleting !== null}
+        onClose={() => { if (rowBusy === null) setDeleting(null); }}
+        title="Delete this vehicle?"
+        description={deleting ? `${deleting.year} ${deleting.make} ${deleting.model} (${deleting.plate}) will be removed. Your request history is unaffected.` : undefined}
+        footer={
+          <>
+            <Button variant="secondary" disabled={rowBusy !== null} onClick={() => setDeleting(null)}>Keep vehicle</Button>
+            <Button
+              variant="danger" loading={rowBusy !== null}
+              onClick={async () => {
+                if (!deleting) return;
+                setRowBusy(deleting.id);
+                const ok = await deleteVehicle(deleting.id);
+                setRowBusy(null);
+                if (!ok) { toast.push({ title: 'Could not delete', tone: 'danger' }); return; }
+                setItems((prev) => prev?.filter((x) => x.id !== deleting.id) ?? null);
+                setDeleting(null);
+                toast.push({ title: 'Vehicle deleted', tone: 'success' });
+              }}
+            >
+              Delete vehicle
+            </Button>
+          </>
+        }
+      >
+        <p className="text-small text-fg-muted">This can't be undone.</p>
+      </Modal>
     </main>
   );
 }

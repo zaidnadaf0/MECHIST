@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/app/firebase';
 import { isValidLatLng } from './geoapify';
+import { DEMO_REQUESTS, DEMO_VEHICLES, isDemo } from './demo';
 
 export interface Vehicle {
   id: string;
@@ -29,10 +30,13 @@ export interface ServiceRequest {
   status: 'requested' | 'accepted' | 'on-the-way' | 'arrived' | 'service' | 'completed' | 'cancelled';
   customerLat: number;
   customerLng: number;
-  mechanicId?: string;
-  mechanicName?: string;
-  mechanicLat?: number;
-  mechanicLng?: number;
+  mechanicId?: string | null;
+  mechanicName?: string | null;
+  /** Assigned mechanic's contact number, written server-side on accept.
+   *  Lets the customer call without reading the mechanics collection. */
+  mechanicPhone?: string | null;
+  mechanicLat?: number | null;
+  mechanicLng?: number | null;
   etaMin?: number;
   /** Mechanic the customer pre-selected on the request wizard, if any. */
   pickedMechanicId?: string;
@@ -76,6 +80,7 @@ function asRequest(id: string, raw: DocumentData | undefined): ServiceRequest | 
 
 export type VehiclesResult = { data: Vehicle[] | null; error: Error | null };
 export async function listVehiclesDetailed(customerId: string): Promise<VehiclesResult> {
+  if (isDemo()) return { data: DEMO_VEHICLES, error: null };
   try {
     const d = requireDb();
     const snap = await getDocs(query(collection(d, 'vehicles'), where('ownerId', '==', customerId), orderBy('createdAt', 'desc')));
@@ -248,6 +253,10 @@ export async function createRequest(r: Omit<ServiceRequest, 'id' | 'createdAt' |
       createdAt: now,
       updatedAt: now,
       offerExpiresAt: now + OFFER_WINDOW_MS,
+      // Explicit null (not absent): the scheduled backend queries filter
+      // `mechanicId == null`, which matches explicit nulls in every
+      // Firestore environment. Rules place no key restriction on create.
+      mechanicId: null,
       ...r,
     };
     await setDoc(doc(d, 'requests', id), next);
@@ -259,6 +268,7 @@ export async function createRequest(r: Omit<ServiceRequest, 'id' | 'createdAt' |
 }
 
 export async function getRequest(id: string): Promise<ServiceRequest | null> {
+  if (isDemo()) return DEMO_REQUESTS.find((r) => r.id === id) ?? null;
   try {
     const d = requireDb();
     const snap = await getDoc(doc(d, 'requests', id));
@@ -281,6 +291,10 @@ export function watchRequest(
   cb: (r: ServiceRequest | null) => void,
   onError?: (err: Error) => void,
 ): Unsubscribe | null {
+  if (isDemo()) {
+    queueMicrotask(() => cb(DEMO_REQUESTS.find((r) => r.id === id) ?? null));
+    return null;
+  }
   try {
     const d = requireDb();
     return onSnapshot(
@@ -302,6 +316,7 @@ export function watchRequest(
 
 export type HistoryResult = { data: ServiceRequest[] | null; error: Error | null };
 export async function listHistoryDetailed(customerId: string, max = 20): Promise<HistoryResult> {
+  if (isDemo()) return { data: DEMO_REQUESTS.slice(0, max), error: null };
   try {
     const d = requireDb();
     const snap = await getDocs(

@@ -22,6 +22,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from '@/app/firebase';
+import { DEMO_NOTIFICATIONS, isDemo } from './demo';
 
 export interface AppNotification {
   id: string;
@@ -29,6 +30,8 @@ export interface AppNotification {
   title: string;
   body?: string;
   requestId?: string;
+  /** Deep-link set by server producers (e.g. /track/:id, /mechanic/job/:id). */
+  path?: string;
   createdAt: number;
   read?: boolean;
 }
@@ -53,6 +56,7 @@ export async function listNotifications(uid: string, max = 20): Promise<AppNotif
 }
 
 export async function listNotificationsDetailed(uid: string, max = 20): Promise<NotificationsResult> {
+  if (isDemo()) return { data: DEMO_NOTIFICATIONS.slice(0, Math.min(Math.max(1, max), 50)), error: null };
   try {
     const d = requireDb();
     const cap = Math.min(Math.max(1, max), 50);
@@ -74,6 +78,10 @@ export function watchNotifications(
   onError?: (err: Error) => void,
   max = 20,
 ): Unsubscribe | null {
+  if (isDemo()) {
+    queueMicrotask(() => cb(DEMO_NOTIFICATIONS.slice(0, Math.min(Math.max(1, max), 50))));
+    return null;
+  }
   try {
     const d = requireDb();
     const cap = Math.min(Math.max(1, max), 50);

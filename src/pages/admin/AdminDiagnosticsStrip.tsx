@@ -27,14 +27,7 @@ import { Card, ProgressBar } from 'pixel-retroui';
 // this file is only rendered from the lazy <AdminDashboard>.
 import 'pixel-retroui/dist/index.css';
 
-type DiagnosticRow = { label: string; value: number; hint?: string };
-
-/** Baseline values used when no live stats are available yet. */
-const BASELINE: DiagnosticRow[] = [
-  { label: 'dispatch health',   value: 98, hint: 'p99 < 800ms' },
-  { label: 'mechanic coverage', value: 76, hint: '11 of 14 sectors staffed' },
-  { label: 'request backlog',   value: 32, hint: 'below SLA' },
-];
+type DiagnosticRow = { label: string; count: number; cap: number; hint: string };
 
 type LiveStats = { requests: number; mechanics: number; users: number } | null;
 
@@ -72,13 +65,29 @@ export function AdminDiagnosticsStrip({ stats }: { stats: LiveStats }) {
 /* -------------------------------------------------------------------------- */
 
 function StripBody({ stats }: { stats: LiveStats }) {
-  const rows: DiagnosticRow[] = !stats
-    ? BASELINE
-    : [
-        { label: 'open requests', value: clampPercent(stats.requests, 100), hint: 'live' },
-        { label: 'mechanics',     value: clampPercent(stats.mechanics, 50),  hint: 'active in last 5 min' },
-        { label: 'users',         value: clampPercent(stats.users, 200),     hint: 'last 24h' },
-      ];
+  // No fake baseline: until the live listeners fire we say so. The bars
+  // are count-vs-documented-cap visualisations, labelled as such — they
+  // are not health scores.
+  if (!stats) {
+    return (
+      <Card
+        bg="#10141c"
+        textColor="#d8e0ec"
+        borderColor="#9ab4ff"
+        shadowColor="#1f3a8a"
+        className="w-full"
+      >
+        <div className="p-4 text-[11px] uppercase tracking-wider" style={{ color: '#7d8aa3' }}>
+          Connecting to live stats…
+        </div>
+      </Card>
+    );
+  }
+  const rows: DiagnosticRow[] = [
+    { label: 'open requests', count: stats.requests, cap: 100, hint: 'status == requested, live' },
+    { label: 'mechanics',     count: stats.mechanics, cap: 50,  hint: 'mechanic docs on roster (any state)' },
+    { label: 'users',         count: stats.users,     cap: 200, hint: 'user docs on roster (any role)' },
+  ];
 
   return (
     <Card
@@ -93,19 +102,17 @@ function StripBody({ stats }: { stats: LiveStats }) {
           <div key={row.label} className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between text-[11px] uppercase tracking-wider">
               <span style={{ color: '#9ab4ff' }}>{row.label}</span>
-              <span style={{ color: '#d8e0ec' }}>{row.value}%</span>
+              <span style={{ color: '#d8e0ec' }}>{row.count} / {row.cap}</span>
             </div>
             <ProgressBar
-              progress={row.value}
+              progress={clampPercent(row.count, row.cap)}
               size="md"
               color="#3b7dff"
               borderColor="#9ab4ff"
             />
-            {row.hint && (
-              <div className="text-[10px]" style={{ color: '#7d8aa3' }}>
-                {row.hint}
-              </div>
-            )}
+            <div className="text-[10px]" style={{ color: '#7d8aa3' }}>
+              {row.hint}
+            </div>
           </div>
         ))}
       </div>
@@ -118,10 +125,22 @@ function StripBody({ stats }: { stats: LiveStats }) {
 /* -------------------------------------------------------------------------- */
 
 function StripFallback({ stats }: { stats: LiveStats }) {
-  const rows: DiagnosticRow[] = !stats ? BASELINE : [
-    { label: 'open requests', value: clampPercent(stats.requests, 100), hint: 'live' },
-    { label: 'mechanics',     value: clampPercent(stats.mechanics, 50),  hint: 'active in last 5 min' },
-    { label: 'users',         value: clampPercent(stats.users, 200),     hint: 'last 24h' },
+  if (!stats) {
+    return (
+      <div
+        className="rounded-lg border border-[#1f3a8a] bg-[#10141c] p-4"
+        style={{ fontFamily: "'Geist Mono', ui-monospace, monospace" }}
+      >
+        <div className="text-[11px] uppercase tracking-wider text-[#7d8aa3]">
+          Connecting to live stats…
+        </div>
+      </div>
+    );
+  }
+  const rows: DiagnosticRow[] = [
+    { label: 'open requests', count: stats.requests, cap: 100, hint: 'status == requested, live' },
+    { label: 'mechanics',     count: stats.mechanics, cap: 50,  hint: 'mechanic docs on roster (any state)' },
+    { label: 'users',         count: stats.users,     cap: 200, hint: 'user docs on roster (any role)' },
   ];
   return (
     <div
@@ -133,12 +152,12 @@ function StripFallback({ stats }: { stats: LiveStats }) {
           <div key={r.label} className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between text-[11px] uppercase tracking-wider text-[#9ab4ff]">
               <span>{r.label}</span>
-              <span className="text-[#d8e0ec]">{r.value}%</span>
+              <span className="text-[#d8e0ec]">{r.count} / {r.cap}</span>
             </div>
             <div className="h-3 w-full overflow-hidden rounded-sm border border-[#9ab4ff]/60 bg-[#0b0e14]">
-              <div className="h-full bg-[#3b7dff]" style={{ width: `${r.value}%` }} />
+              <div className="h-full bg-[#3b7dff]" style={{ width: `${clampPercent(r.count, r.cap)}%` }} />
             </div>
-            {r.hint && <div className="text-[10px] text-[#7d8aa3]">{r.hint}</div>}
+            <div className="text-[10px] text-[#7d8aa3]">{r.hint}</div>
           </div>
         ))}
       </div>

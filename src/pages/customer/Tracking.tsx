@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Card, Badge, Button, Modal, Textarea, useToast } from '@/components/ui';
+import { Card, Badge, Button, Modal, ReceiptRow, Textarea, useToast } from '@/components/ui';
 import { ErrorState, Skeleton, EmptyState, ProgressBar } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
-import { watchRequest, rateRequest, type ServiceRequest } from '@/lib/customer';
+import { watchRequest, rateRequest, cancelRequest, CANCELLABLE_STATUSES, type ServiceRequest } from '@/lib/customer';
 import { useAuth } from '@/app/AuthProvider';
 import { distanceKm, kmToMin } from '@/lib/geo';
 import { ProviderMap } from '@/components/map/ProviderMap';
@@ -27,6 +27,9 @@ export function Tracking() {
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [ratingBusy, setRatingBusy] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
@@ -140,8 +143,20 @@ export function Tracking() {
                 {liveEta != null ? `ETA ${liveEta} min` : 'Awaiting ETA update'}
               </div>
               <div className="mt-4 flex gap-2">
-                <Button variant="secondary" size="sm" fullWidth>Message</Button>
-                <Button variant="ghost" size="sm" fullWidth>Call</Button>
+                {req.mechanicPhone ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    fullWidth
+                    onClick={() => { window.location.href = `tel:${req.mechanicPhone}`; }}
+                  >
+                    Call
+                  </Button>
+                ) : (
+                  <Button variant="secondary" size="sm" fullWidth disabled title="The mechanic's number appears here once the assignment syncs">
+                    Call
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
@@ -180,9 +195,9 @@ export function Tracking() {
       <Card className="mt-6">
         <h2 className="text-h2 text-fg-app">Details</h2>
         <dl className="mt-3 grid gap-3 text-small">
-          <Row label="Problem" value={req.problemText} />
-          <Row label="Category" value={req.problemCategory ?? '—'} />
-          <Row label="Customer location" value={`${req.customerLat.toFixed(5)}, ${req.customerLng.toFixed(5)}`} />
+          <ReceiptRow label="Problem" value={req.problemText} />
+          <ReceiptRow label="Category" value={req.problemCategory ?? null} />
+          <ReceiptRow label="Customer location" value={`${req.customerLat.toFixed(5)}, ${req.customerLng.toFixed(5)}`} />
         </dl>
       </Card>
 
@@ -191,6 +206,59 @@ export function Tracking() {
           <Button variant="primary" onClick={() => setRatingOpen(true)}>Rate this service</Button>
         </div>
       )}
+
+      {(CANCELLABLE_STATUSES as readonly string[]).includes(req.status) && (
+        <div className="mt-6">
+          <Button variant="ghost" size="md" onClick={() => { setCancelReason(''); setCancelOpen(true); }}>
+            Cancel request
+          </Button>
+          <p className="mt-1.5 text-xs text-fg-subtle">
+            Free to cancel while the job hasn't started billing. The mechanic is notified immediately.
+          </p>
+        </div>
+      )}
+
+      <Modal
+        open={cancelOpen}
+        onClose={() => { if (!cancelBusy) setCancelOpen(false); }}
+        title="Cancel this request?"
+        description="This writes the cancellation to Firestore and notifies the mechanic. This can't be undone."
+        footer={
+          <>
+            <Button variant="secondary" disabled={cancelBusy} onClick={() => setCancelOpen(false)}>Keep request</Button>
+            <Button variant="primary" loading={cancelBusy} onClick={async () => {
+              if (!user || cancelBusy) return;
+              setCancelBusy(true);
+              try {
+                const result = await cancelRequest(req.id, user.uid, cancelReason || undefined);
+                if (result === 'cancelled') {
+                  setCancelOpen(false);
+                  toast.push({ title: 'Request cancelled', tone: 'success' });
+                  // The realtime watcher above re-renders this page to `cancelled`.
+                } else if (result === 'too_late') {
+                  setCancelOpen(false);
+                  toast.push({ title: 'Too late to cancel', description: 'This request already moved past a cancellable state.', tone: 'info' });
+                } else if (result === 'forbidden') {
+                  toast.push({ title: 'Not allowed', description: 'You can only cancel your own requests.', tone: 'danger' });
+                } else {
+                  toast.push({ title: 'Could not cancel', description: 'Check your connection and try again.', tone: 'danger' });
+                }
+              } finally {
+                setCancelBusy(false);
+              }
+            }}>Confirm cancellation</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Textarea
+            label="Reason (optional)"
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="e.g. Managed on my own, wrong location, duplicate request…"
+          />
+        </div>
+      </Modal>
 
       <Modal
         open={ratingOpen}
@@ -236,14 +304,5 @@ export function Tracking() {
         </div>
       </Modal>
     </main>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between gap-4 border-b border-[color:var(--border-subtle)] pb-2 last:border-b-0 last:pb-0">
-      <dt className="text-fg-muted">{label}</dt>
-      <dd className="text-fg-app text-right max-w-[60%]">{value}</dd>
-    </div>
   );
 }

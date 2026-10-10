@@ -1,24 +1,34 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Badge, Button, useToast } from '@/components/ui';
+import { Card, Badge, Button, Input, useToast } from '@/components/ui';
 import { ErrorState, Skeleton } from '@/components/feedback';
 import { FadeIn } from '@/components/motion';
 import { useAuth } from '@/app/AuthProvider';
-import { getMechanicProfile, setAvailability, type MechanicProfile } from '@/lib/mechanic';
+import { getMechanicProfile, getMechanicContact, updateMechanicContact, setAvailability, type MechanicProfile, type MechanicContact } from '@/lib/mechanic';
+import { verificationUi } from '@/lib/authUI';
 
 export function MechanicProfilePage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const [profile, setProfile] = useState<MechanicProfile | null | 'loading'>('loading');
+  const [contact, setContact] = useState<MechanicContact | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [phoneDraft, setPhoneDraft] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
 
   useEffect(() => {
     if (!user) { navigate('/login?mode=signin', { replace: true }); return; }
     let cancelled = false;
-    getMechanicProfile(user.uid)
-      .then((p) => { if (!cancelled) setProfile(p); })
+    Promise.all([getMechanicProfile(user.uid), getMechanicContact(user.uid)])
+      .then(([p, c]) => {
+        if (cancelled) return;
+        setProfile(p);
+        setContact(c);
+        if (c?.phone) setPhoneDraft(c.phone);
+      })
       .catch((e: unknown) => {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -56,11 +66,33 @@ export function MechanicProfilePage() {
     }
   };
 
+  // Owner-only contact card with legacy fallback: pre-split profiles still
+  // carry phone on the parent doc until the migration script strips it.
+  const phoneShown = contact?.phone ?? profile.phone ?? null;
+  const verif = verificationUi(profile.verificationStatus ?? null);
+
+  const savePhone = async () => {
+    const v = phoneDraft.trim();
+    if (!v) { toast.push({ title: 'Enter a phone number', tone: 'info' }); return; }
+    setSavingPhone(true);
+    const ok = await updateMechanicContact(user.uid, { phone: v });
+    setSavingPhone(false);
+    if (!ok) { toast.push({ title: 'Could not save phone', tone: 'danger' }); return; }
+    setContact((c) => ({ phone: v, email: c?.email ?? null }));
+    setEditingPhone(false);
+    toast.push({ title: 'Contact number saved', tone: 'success' });
+  };
+
   return (
     <main className="container section-compact">
       <FadeIn>
-        <div className="text-xs uppercase tracking-wider text-fg-muted">Profile</div>
-        <h1 className="mt-2 display text-display-md text-fg-app">{profile.name}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <div>
+            <div className="text-xs uppercase tracking-wider text-fg-muted">Profile</div>
+            <h1 className="mt-2 display text-display-md text-fg-app">{profile.name}</h1>
+          </div>
+          <Badge tone={verif.badgeTone} dot>{verif.badgeLabel}</Badge>
+        </div>
       </FadeIn>
 
       <div className="mt-8 grid gap-6 lg:grid-cols-3">
@@ -68,9 +100,38 @@ export function MechanicProfilePage() {
           <h2 className="text-h2 text-fg-app">Details</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <Field label="Email"   value={user.email ?? '—'} />
-            <Field label="Phone"   value={profile.phone ?? '—'} />
+            <div>
+              <div className="text-xs uppercase tracking-wider text-fg-muted">Phone</div>
+              {editingPhone ? (
+                <div className="mt-1">
+                  <Input
+                    label="Phone"
+                    value={phoneDraft}
+                    onChange={(e) => setPhoneDraft(e.target.value)}
+                    placeholder="+91 …"
+                    inputMode="tel"
+                    autoComplete="tel"
+                  />
+                  <div className="mt-2 flex gap-2">
+                    <Button size="sm" loading={savingPhone} onClick={savePhone}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setEditingPhone(false); setPhoneDraft(phoneShown ?? ''); }}>Cancel</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="text-fg-app">{phoneShown ?? '—'}</span>
+                  <Button size="sm" variant="ghost" onClick={() => { setPhoneDraft(phoneShown ?? ''); setEditingPhone(true); }}>
+                    {phoneShown ? 'Edit' : 'Add'}
+                  </Button>
+                </div>
+              )}
+            </div>
             <Field label="Vehicle" value={profile.vehicleDescription ?? '—'} />
             <Field label="Approved" value={profile.approved ? 'Yes' : 'Pending review'} />
+            <Field
+              label="Rating"
+              value={typeof profile.rating === 'number' ? `${profile.rating.toFixed(1)} / 5 (${profile.reviewCount ?? 0} reviews)` : 'No ratings yet'}
+            />
             <div className="sm:col-span-2">
               <div className="text-xs uppercase tracking-wider text-fg-muted">Specialties</div>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -83,7 +144,10 @@ export function MechanicProfilePage() {
         </Card>
         <Card>
           <h2 className="text-h2 text-fg-app">Availability</h2>
-          <p className="mt-2 text-small text-fg-muted">Going offline hides you from the live queue.</p>
+          <p className="mt-2 text-small text-fg-muted">
+            Going offline hides you from the live queue.
+            {!verif.canAcceptJobs && ' Availability has no effect until your application is approved.'}
+          </p>
           <div className="mt-4">
             <Button variant={profile.isAvailable ? 'secondary' : 'primary'} fullWidth loading={busy} onClick={toggle}>
               {profile.isAvailable ? 'Go offline' : 'Go available'}
